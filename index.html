@@ -1,0 +1,1368 @@
+<title>Cabine Facturation</title>
+<meta name="claude:viewport-fit-sides" content="cover">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Bricolage+Grotesque:opsz,wght@12..96,500;12..96,700&family=Instrument+Sans:wght@400;500;600&display=swap">
+<style>
+/* Layout: app shell — sidebar on desktop, bottom tab bar on phone; content in a single readable column. */
+:root{
+  --bg:#f4f5f8; --surface:#ffffff; --surface-2:#eceef4; --line:#d9dce6;
+  --ink:#151a2b; --ink-2:#555c72; --ink-3:#8a90a3;
+  --accent:#3046c9; --accent-ink:#ffffff; --accent-soft:#e3e7fb;
+  --ok:#16794a; --ok-soft:#ddf3e7; --warn:#a45a00; --warn-soft:#fdeed6; --bad:#b3261e; --bad-soft:#fbe2df;
+  --f-display:"Bricolage Grotesque", "Avenir Next", system-ui, sans-serif;
+  --f-body:"Instrument Sans", system-ui, -apple-system, "Segoe UI", sans-serif;
+  --r:10px; --shadow:0 1px 2px rgba(20,26,43,.06),0 6px 24px rgba(20,26,43,.07);
+}
+@media (prefers-color-scheme: dark){:root:not([data-theme="light"]){
+  --bg:#0f1220; --surface:#171b2c; --surface-2:#20253a; --line:#2c3250;
+  --ink:#eceef6; --ink-2:#a9aec4; --ink-3:#737a95;
+  --accent:#8c9cff; --accent-ink:#0f1220; --accent-soft:#252c52;
+  --ok:#5fd39a; --ok-soft:#173327; --warn:#f2b45c; --warn-soft:#3a2a12; --bad:#ff8a80; --bad-soft:#3d1a1a;
+  --shadow:0 1px 2px rgba(0,0,0,.3),0 6px 24px rgba(0,0,0,.3); color-scheme:dark}}
+:root[data-theme="dark"]{
+  --bg:#0f1220; --surface:#171b2c; --surface-2:#20253a; --line:#2c3250;
+  --ink:#eceef6; --ink-2:#a9aec4; --ink-3:#737a95;
+  --accent:#8c9cff; --accent-ink:#0f1220; --accent-soft:#252c52;
+  --ok:#5fd39a; --ok-soft:#173327; --warn:#f2b45c; --warn-soft:#3a2a12; --bad:#ff8a80; --bad-soft:#3d1a1a;
+  --shadow:0 1px 2px rgba(0,0,0,.3),0 6px 24px rgba(0,0,0,.3); color-scheme:dark}
+*{box-sizing:border-box}
+html,body{height:100%}
+body{background:var(--bg);color:var(--ink);font-family:var(--f-body);font-size:15px;line-height:1.45;font-variant-numeric:tabular-nums}
+body::before{content:"";position:fixed;inset:0 0 auto;height:env(safe-area-inset-top,0px);z-index:30;background:var(--bg)}
+h1,h2,h3{font-family:var(--f-display);font-weight:700;letter-spacing:-.01em;text-wrap:balance;margin:0}
+h1{font-size:1.6rem} h2{font-size:1.2rem} h3{font-size:1rem}
+button,input,select,textarea{font:inherit;color:inherit}
+button{cursor:pointer}
+:focus-visible{outline:2px solid var(--accent);outline-offset:2px}
+.shell{display:flex;min-height:100%}
+.side{display:none}
+.main{flex:1;min-width:0;padding-left:max(16px,env(safe-area-inset-left,0px));padding-right:max(16px,env(safe-area-inset-right,0px));padding-block:16px 96px}
+.wrap{max-width:860px;margin:0 auto;display:flex;flex-direction:column;gap:18px}
+.topbar{display:flex;align-items:center;justify-content:space-between;gap:12px;flex-wrap:wrap}
+.brand{font-family:var(--f-display);font-weight:700;font-size:1.05rem;display:flex;align-items:center;gap:8px}
+.brand .disc{width:22px;height:22px;border-radius:50%;background:radial-gradient(circle,var(--accent) 0 18%,var(--ink) 19% 23%,var(--ink-2) 24% 100%);flex:none}
+.tabs{position:fixed;left:0;right:0;bottom:0;z-index:20;background:var(--surface);border-top:1px solid var(--line);display:grid;grid-template-columns:repeat(5,1fr);padding:6px max(6px,env(safe-area-inset-right,0px)) calc(6px + env(safe-area-inset-bottom,0px)) max(6px,env(safe-area-inset-left,0px))}
+.tabs a,.side a{display:flex;flex-direction:column;align-items:center;gap:2px;font-size:.72rem;color:var(--ink-2);text-decoration:none;padding:6px 2px;border-radius:8px}
+.tabs a.on,.side a.on{color:var(--accent);background:var(--accent-soft)}
+.tabs svg,.side svg{width:22px;height:22px}
+@media (min-width:900px){
+  .tabs{display:none}
+  .side{display:flex;flex-direction:column;gap:4px;width:220px;flex:none;padding:20px 12px;border-right:1px solid var(--line);background:var(--surface);position:sticky;top:0;height:100vh}
+  .side a{flex-direction:row;font-size:.95rem;gap:10px;padding:9px 12px}
+  .side .brand{padding:4px 12px 18px}
+  .main{padding-block:28px 40px}
+  .brand.mob{display:none}
+}
+.card{background:var(--surface);border:1px solid var(--line);border-radius:var(--r);padding:16px}
+.grid2{display:grid;grid-template-columns:repeat(auto-fit,minmax(min(100%,240px),1fr));gap:12px}
+.stats{display:grid;grid-template-columns:repeat(auto-fit,minmax(min(100%,160px),1fr));gap:12px}
+.stat .lab{font-size:.75rem;text-transform:uppercase;letter-spacing:.06em;color:var(--ink-2)}
+.stat .val{font-family:var(--f-display);font-size:1.5rem;font-weight:700;margin-top:2px}
+.stat .sub{font-size:.8rem;color:var(--ink-3)}
+.meter{height:8px;border-radius:4px;background:var(--surface-2);overflow:hidden;margin-top:8px}
+.meter i{display:block;height:100%;background:var(--accent)}
+.row{display:flex;align-items:center;gap:10px;flex-wrap:wrap}
+.row.sb{justify-content:space-between}
+.stack{display:flex;flex-direction:column;gap:10px}
+.muted{color:var(--ink-2)} .small{font-size:.83rem} .tiny{font-size:.75rem;color:var(--ink-3)}
+.btn{border:1px solid var(--line);background:var(--surface);border-radius:8px;padding:9px 14px;font-weight:600;display:inline-flex;align-items:center;gap:6px;min-height:40px}
+.btn:hover{border-color:var(--ink-3)}
+.btn.pri{background:var(--accent);color:var(--accent-ink);border-color:var(--accent)}
+.btn.ghost{border-color:transparent;background:transparent;color:var(--accent)}
+.btn.danger{color:var(--bad);border-color:var(--bad-soft)}
+.btn.sm{padding:5px 10px;min-height:32px;font-size:.85rem}
+.btn:disabled{opacity:.5;cursor:not-allowed}
+.list{display:flex;flex-direction:column;background:var(--surface);border:1px solid var(--line);border-radius:var(--r);overflow:hidden}
+.item{display:flex;align-items:center;gap:12px;padding:12px 14px;border-bottom:1px solid var(--line);background:none;border-left:0;border-right:0;border-top:0;text-align:left;width:100%}
+.item:last-child{border-bottom:0}
+button.item:hover{background:var(--surface-2)}
+.item .grow{flex:1;min-width:0}
+.item>svg{width:22px;height:22px;flex:none;color:var(--ink-2)}
+.item .t{font-weight:600;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.item .amt{font-weight:600;white-space:nowrap}
+.pill{display:inline-block;font-size:.72rem;font-weight:600;padding:2px 8px;border-radius:999px;background:var(--surface-2);color:var(--ink-2);white-space:nowrap}
+.pill.draft{background:var(--warn-soft);color:var(--warn)}
+.pill.due{background:var(--accent-soft);color:var(--accent)}
+.pill.paid,.pill.accepted{background:var(--ok-soft);color:var(--ok)}
+.pill.late,.pill.refused{background:var(--bad-soft);color:var(--bad)}
+.datechip{flex:none;width:46px;text-align:center;border-radius:8px;background:var(--surface-2);padding:4px 0;line-height:1.1}
+.datechip b{display:block;font-family:var(--f-display);font-size:1.15rem}
+.datechip span{font-size:.68rem;text-transform:uppercase;letter-spacing:.05em;color:var(--ink-2)}
+.seg{display:inline-flex;background:var(--surface-2);border-radius:9px;padding:3px;gap:2px}
+.seg button{border:0;background:none;padding:6px 12px;border-radius:7px;font-weight:600;color:var(--ink-2);font-size:.9rem}
+.seg button.on{background:var(--surface);color:var(--ink);box-shadow:var(--shadow)}
+label.f{display:flex;flex-direction:column;gap:4px;font-size:.82rem;font-weight:600;color:var(--ink-2);min-width:0}
+label.f input,label.f select,label.f textarea,.inp{font-weight:400;font-size:1rem;color:var(--ink);background:var(--surface);border:1px solid var(--line);border-radius:8px;padding:9px 11px;width:100%;min-width:0}
+label.f textarea{min-height:76px;resize:vertical}
+.fields{display:grid;grid-template-columns:repeat(auto-fit,minmax(min(100%,200px),1fr));gap:12px}
+.fields .full{grid-column:1/-1}
+.check{display:flex;gap:8px;align-items:flex-start;font-size:.92rem}
+.check input{margin-top:3px;width:18px;height:18px;accent-color:var(--accent)}
+.overlay{position:fixed;inset:0;z-index:40;background:rgba(10,12,22,.45);display:flex;justify-content:center;align-items:flex-end}
+.sheet{background:var(--bg);width:100%;max-width:760px;max-height:100%;overflow:auto;border-radius:14px 14px 0 0;display:flex;flex-direction:column}
+.sheet-h{position:sticky;top:0;z-index:2;background:var(--bg);display:flex;align-items:center;justify-content:space-between;gap:8px;padding:calc(12px + env(safe-area-inset-top,0px)) max(16px,env(safe-area-inset-right,0px)) 12px max(16px,env(safe-area-inset-left,0px));border-bottom:1px solid var(--line)}
+.sheet-b{padding:16px max(16px,env(safe-area-inset-right,0px)) calc(24px + env(safe-area-inset-bottom,0px)) max(16px,env(safe-area-inset-left,0px));display:flex;flex-direction:column;gap:16px}
+@media (max-width:640px){.sheet{height:100%;border-radius:0}}
+@media (min-width:641px){.overlay{align-items:center;padding:24px}.sheet{border-radius:14px;max-height:92vh;box-shadow:var(--shadow)}.sheet-h{padding-top:12px}}
+.sect{display:flex;flex-direction:column;gap:10px}
+.sect>.lab{font-size:.75rem;text-transform:uppercase;letter-spacing:.07em;color:var(--ink-2);font-weight:600}
+.line-ed{border:1px solid var(--line);border-radius:var(--r);background:var(--surface);padding:12px;display:flex;flex-direction:column;gap:10px}
+.line-ed .nums{display:grid;grid-template-columns:repeat(auto-fit,minmax(90px,1fr));gap:8px}
+.totals{display:flex;flex-direction:column;gap:4px;align-items:flex-end}
+.totals div{display:flex;gap:16px;justify-content:space-between;min-width:220px}
+.totals .big{font-family:var(--f-display);font-size:1.25rem;font-weight:700}
+.cal{display:grid;grid-template-columns:repeat(7,1fr);gap:4px}
+.cal .dow{font-size:.7rem;text-transform:uppercase;letter-spacing:.05em;color:var(--ink-3);text-align:center;padding:4px 0}
+.cal button{aspect-ratio:1/1;max-width:100%;border:1px solid transparent;background:var(--surface);border-radius:8px;display:flex;flex-direction:column;align-items:center;justify-content:flex-start;padding:5px 2px;gap:3px;font-size:.9rem;min-width:0}
+.cal button.out{opacity:.35}
+.cal button.today{border-color:var(--accent)}
+.cal button.sel{background:var(--accent);color:var(--accent-ink)}
+.cal .dots{display:flex;gap:2px;flex-wrap:wrap;justify-content:center}
+.cal .dots i{width:6px;height:6px;border-radius:50%;background:var(--accent)}
+.cal button.sel .dots i{background:var(--accent-ink)}
+.cal .dots i.rdv{background:var(--warn)}
+.notice{border-radius:var(--r);padding:12px 14px;background:var(--accent-soft);color:var(--ink);font-size:.9rem}
+.notice.warn{background:var(--warn-soft)}
+.empty{text-align:center;padding:28px 16px;color:var(--ink-2)}
+.empty h3{color:var(--ink);margin-bottom:6px}
+.results{display:flex;flex-direction:column;border:1px solid var(--line);border-radius:8px;overflow:hidden;background:var(--surface)}
+.results button{border:0;border-bottom:1px solid var(--line);background:none;text-align:left;padding:10px 12px}
+.results button:last-child{border-bottom:0}
+.results button:hover{background:var(--surface-2)}
+.toast{position:fixed;left:50%;transform:translateX(-50%);bottom:calc(84px + env(safe-area-inset-bottom,0px));z-index:60;background:var(--ink);color:var(--bg);padding:10px 16px;border-radius:999px;font-size:.9rem;max-width:calc(100% - 32px);box-shadow:var(--shadow)}
+.preview{background:#fff;color:#151a2b;border-radius:6px;box-shadow:var(--shadow);overflow:hidden}
+.preview img{display:block;width:100%;height:auto}
+.logo-prev{max-height:60px;max-width:180px;object-fit:contain;background:#fff;border-radius:6px;padding:4px;border:1px solid var(--line)}
+.chip{display:inline-flex;align-items:center;gap:6px;border:1px solid var(--line);background:var(--surface);border-radius:999px;padding:5px 12px 5px 6px;font-weight:600;font-size:.88rem;max-width:100%}
+.chip .dot{width:20px;height:20px;border-radius:50%;flex:none}
+.chip select{border:0;background:none;font-weight:600;max-width:200px}
+.sheet.wide{max-width:1280px}
+.ed-grid{display:grid;grid-template-columns:minmax(0,1fr);gap:20px}
+.ed-form{display:flex;flex-direction:column;gap:16px;min-width:0}
+.ed-prev{min-width:0}
+.ed-grid[data-tab="edit"] .ed-prev{display:none}
+.ed-grid[data-tab="preview"] .ed-form{display:none}
+.pdf-box{display:flex;flex-direction:column;gap:10px}
+.pdf-box canvas{display:block;width:100%;height:auto;background:#fff;border-radius:4px;box-shadow:var(--shadow)}
+@media (min-width:1000px){
+  .ed-grid{grid-template-columns:minmax(0,1fr) minmax(0,1fr)}
+  .ed-grid[data-tab] .ed-prev,.ed-grid[data-tab] .ed-form{display:flex}
+  .ed-prev{position:sticky;top:64px;align-self:start;max-height:calc(92vh - 90px);overflow:auto;flex-direction:column;gap:8px}
+  .ed-tabs{display:none}
+}
+@media (prefers-reduced-motion:no-preference){.sheet{animation:up .18s ease-out}@keyframes up{from{transform:translateY(16px);opacity:.6}to{transform:none;opacity:1}}}
+</style>
+
+<div id="app"><div class="empty" style="padding-top:80px"><h3>Chargement de vos données…</h3></div></div>
+
+<script src="https://unpkg.com/htm@3.1.1/preact/standalone.umd.js"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/jspdf/2.5.1/jspdf.umd.min.js"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/jspdf-autotable/3.8.2/jspdf.plugin.autotable.min.js"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.worker.min.js"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.min.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2.45.4/dist/umd/supabase.js"></script>
+<script>
+const {html, render, useState, useEffect, useMemo, useRef} = htmPreact;
+
+/* ---------------- utilitaires ---------------- */
+const uid = () => (crypto.randomUUID ? crypto.randomUUID() : Date.now().toString(36)+Math.random().toString(36).slice(2));
+const r2 = n => Math.round((Number(n)||0)*100)/100;
+const eur = n => (Number(n)||0).toLocaleString('fr-FR',{style:'currency',currency:'EUR'}).replace(/[  ]/g,' ');
+const todayISO = () => { const d=new Date(); return iso(d); };
+const iso = d => `${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,'0')}-${String(d.getDate()).padStart(2,'0')}`;
+const parseISO = s => { const [y,m,d]=(s||'').split('-').map(Number); return new Date(y,(m||1)-1,d||1); };
+const addDays = (s,n) => { const d=parseISO(s); d.setDate(d.getDate()+Number(n||0)); return iso(d); };
+const fdate = s => s ? parseISO(s).toLocaleDateString('fr-FR') : '';
+const fdateLong = s => s ? parseISO(s).toLocaleDateString('fr-FR',{weekday:'long',day:'numeric',month:'long',year:'numeric'}) : '';
+const MONTHS = ['janvier','février','mars','avril','mai','juin','juillet','août','septembre','octobre','novembre','décembre'];
+const MSHORT = ['janv','févr','mars','avr','mai','juin','juil','août','sept','oct','nov','déc'];
+const clone = o => JSON.parse(JSON.stringify(o));
+
+const STATUSES = { micro:'Micro-entreprise (EI)', ei:'Entreprise individuelle (EI, réel)', sasu:'SASU', sas:'SAS', eurl:'EURL', sarl:'SARL' };
+const isCompany = s => ['sasu','sas','eurl','sarl'].includes(s);
+const EVENT_TYPES = ['Mariage','Anniversaire','Soirée d’entreprise','Bar / Club','Festival','Soirée privée','Gala / Remise de diplômes','Autre'];
+const PROFILE_COLORS = ['#3046c9','#0f7d6c','#b5441d','#7a3fb8','#a1155a','#4b5563'];
+
+/* ---------------- stockage ---------------- */
+const COLS = ['profiles','clients','products','docs','events','settings'];
+const S = {profiles:[],clients:[],products:[],docs:[],events:[],settings:[],bookings:[]};
+const subs = new Set(); const emit = () => subs.forEach(f=>f());
+const LS_KEY = 'cabine-facturation-v1';
+let backend = {mode:'local', put:async()=>{}, del:async()=>{}, note:''};
+function lsGet(k){ try{ return localStorage.getItem(k); }catch(e){ return null; } }
+function lsSet(k,v){ try{ localStorage.setItem(k,v); }catch(e){} }
+
+let sb=null;
+async function initSupabase(cfg){
+  sb = window.supabase.createClient(cfg.supabaseUrl, cfg.supabaseAnonKey, {auth:{persistSession:true, autoRefreshToken:true, detectSessionInUrl:true, flowType:'pkce'}});
+  backend.mode='supabase';
+  const {data:{session}} = await sb.auth.getSession();
+  if(!session){ backend.needLogin=true; return; }
+  const user = session.user; backend.user=user;
+  if(session.provider_refresh_token){
+    const {error}=await sb.from('google_tokens').upsert({user_id:user.id, refresh_token:session.provider_refresh_token, email:user.email, updated_at:new Date().toISOString()});
+    if(error) backend.note='Le lien avec Google n’a pas pu être enregistré ('+error.message+'). Déconnectez-vous puis reconnectez-vous.';
+  }
+  let from=0, rows=[];
+  for(;;){ const {data,error}=await sb.from('items').select('col,id,data').range(from,from+999); if(error){ backend.note='Chargement impossible : '+error.message; break; } rows=rows.concat(data); if(data.length<1000) break; from+=1000; }
+  COLS.forEach(c=>S[c]=[]); rows.forEach(r=>{ if(S[r.col]) S[r.col].push({...r.data, id:r.id}); });
+  sb.channel('items-'+user.id).on('postgres_changes',{event:'*',schema:'public',table:'items',filter:'user_id=eq.'+user.id}, p=>{
+    const r = p.eventType==='DELETE' ? p.old : p.new; if(!r || !S[r.col]) return;
+    if(p.eventType==='DELETE') S[r.col]=S[r.col].filter(x=>x.id!==r.id);
+    else { const o={...r.data, id:r.id}; const i=S[r.col].findIndex(x=>x.id===r.id); S[r.col] = i>=0 ? S[r.col].map(x=>x.id===r.id?o:x) : [...S[r.col], o]; }
+    emit();
+  }).subscribe();
+  const loadBookings = async()=>{ const {data}=await sb.from('booking_requests').select('*').order('created_at',{ascending:false}).limit(300); S.bookings=data||[]; emit(); };
+  await loadBookings();
+  sb.channel('bk-'+user.id).on('postgres_changes',{event:'*',schema:'public',table:'booking_requests',filter:'user_id=eq.'+user.id}, loadBookings).subscribe();
+  backend.put = async (c,o)=>{ const {id:_i,...body}=o; const {error}=await sb.from('items').upsert({user_id:user.id, col:c, id:o.id, data:clone(body), updated_at:new Date().toISOString()}); if(error) throw error; };
+  backend.del = async (c,i)=>{ const {error}=await sb.from('items').delete().match({user_id:user.id, col:c, id:i}); if(error) throw error; };
+  setTimeout(pullGoogle, 1500); setInterval(pullGoogle, 5*60*1000);
+  document.addEventListener('visibilitychange', ()=>{ if(document.visibilityState==='visible') pullGoogle(); });
+}
+async function initStore(){
+  const cfg = window.CABINE_CONFIG;
+  if(cfg && cfg.supabaseUrl && window.supabase) return initSupabase(cfg);
+  let db=null, id=null;
+  try{
+    if(window.claude && window.claude.use){
+      db = await window.claude.use('db');
+      const u = await window.claude.use('user');
+      id = u ? await u.id() : null;
+    }
+  }catch(e){ db=null; }
+  if(db && id){
+    const root = db.doc(`data/users/${id}/app`);
+    const refs = {}; const loaded = new Set();
+    await new Promise(res=>{
+      const t = setTimeout(()=>{ backend.note='Vos données mettent du temps à arriver. Elles s’afficheront dès que la connexion répond.'; res(); }, 10000);
+      COLS.forEach(c=>{
+        refs[c] = root.collection(c);
+        refs[c].onSnapshot(snap=>{
+          S[c] = snap.docs.map(d=>({...d.data(), id:d.id}));
+          if(!snap.metadata.fromCache && !loaded.has(c)){ loaded.add(c); if(loaded.size===COLS.length){ clearTimeout(t); backend.note=''; res(); } }
+          emit();
+        }, err=>{ backend.note='La synchronisation s’est interrompue ('+err.code+'). Rechargez la page.'; emit(); if(!loaded.has(c)){ loaded.add(c); if(loaded.size===COLS.length){clearTimeout(t);res();} } });
+      });
+    });
+    backend.mode='cloud';
+    backend.put = async (c,o)=>{ const {id:_i,...body}=o; await refs[c].doc(o.id).set(clone(body)); };
+    backend.del = async (c,i)=>{ await refs[c].doc(i).delete(); };
+  } else {
+    const raw = lsGet(LS_KEY);
+    if(raw){ try{ Object.assign(S, JSON.parse(raw)); }catch(e){} }
+    const save = ()=>lsSet(LS_KEY, JSON.stringify(S));
+    backend.mode='local';
+    backend.put = async ()=>save(); backend.del = async ()=>save();
+    backend.note = db===null && window.claude ? 'Connectez-vous à claude.ai pour que vos données soient sauvegardées dans le cloud. Pour l’instant elles restent sur cet appareil.' : '';
+  }
+}
+async function put(c,o,opts){
+  const i = S[c].findIndex(x=>x.id===o.id);
+  if(i>=0) S[c] = S[c].map(x=>x.id===o.id?o:x); else S[c] = [...S[c], o];
+  emit();
+  try{ await backend.put(c,o); }catch(e){ toast('Enregistrement impossible : '+(e.code||e.message)); return o; }
+  if(c==='events' && !(opts&&opts.noSync)) pushEvent(o);
+  return o;
+}
+async function del(c,id,opts){
+  const old = S[c].find(x=>x.id===id);
+  S[c] = S[c].filter(x=>x.id!==id); emit();
+  try{ await backend.del(c,id); }catch(e){ toast('Suppression impossible : '+(e.code||e.message)); return; }
+  if(c==='events' && old && old.googleId && !(opts&&opts.noSync) && googleOn()) gcall('delete',{googleId:old.googleId}).catch(()=>{});
+}
+
+/* ---------------- Google (Gmail + Agenda), uniquement sur le site installé ---------------- */
+const settings = () => S.settings.find(x=>x.id==='main') || {id:'main'};
+async function saveSettings(patch){ return put('settings', {...settings(), ...patch, id:'main'}); }
+const googleOn = () => backend.mode==='supabase' && !!settings().calendarSync && !!settings().calendarId;
+async function gcall(action, payload={}){
+  if(!sb) throw new Error('Disponible uniquement sur la version installée');
+  const {data,error} = await sb.functions.invoke('google', {body:{action, calendarId:settings().calendarId, ...payload}});
+  if(error){ let msg=error.message; try{ const j=await error.context.json(); msg=j.error||msg; }catch(_){} throw new Error(msg); }
+  return data;
+}
+function eventSummary(e){ const c=clientById(e.clientId); const cn=c?clientName(c):''; if(e.kind==='rdv') return 'RDV · '+(cn||e.location||'client'); return [e.location||e.eventType||'Soirée DJ', cn].filter(Boolean).join(' · '); }
+const pushing = new Set();
+async function pushEvent(e){
+  if(!googleOn() || pushing.has(e.id)) return; pushing.add(e.id);
+  try{
+    const r = await gcall('upsert',{event:{id:e.id, kind:e.kind, date:e.date, start:e.start, end:e.end, summary:eventSummary(e), location:e.location, description:[e.eventType, e.notes].filter(Boolean).join('\n'), googleId:e.googleId}});
+    const cur = S.events.find(x=>x.id===e.id);
+    if(cur && r.googleId && r.googleId!==cur.googleId) await put('events', {...cur, googleId:r.googleId}, {noSync:true});
+  }catch(err){ toast('Google Agenda : '+err.message); }
+  pushing.delete(e.id);
+}
+function parisParts(str, allDay){
+  if(allDay) return {date:str.slice(0,10), time:''};
+  const p = new Intl.DateTimeFormat('en-GB',{timeZone:'Europe/Paris',year:'numeric',month:'2-digit',day:'2-digit',hour:'2-digit',minute:'2-digit',hourCycle:'h23'}).formatToParts(new Date(str));
+  const g=t=>p.find(x=>x.type===t).value; return {date:`${g('year')}-${g('month')}-${g('day')}`, time:`${g('hour')}:${g('minute')}`};
+}
+let pulling=false;
+async function pullGoogle(){
+  if(!googleOn() || pulling) return; pulling=true; let created=0;
+  try{
+    const r = await gcall('pull',{since:settings().lastPull});
+    for(const g of r.items||[]){
+      const local = S.events.find(e=>e.googleId===g.googleId || (g.cabineId && e.id===g.cabineId));
+      if(g.status==='cancelled'){
+        if(local){ const inv=S.docs.find(d=>d.id===local.invoiceId); if(inv && inv.status==='brouillon') await del('docs',inv.id); await del('events',local.id,{noSync:true}); }
+        continue;
+      }
+      const st=parisParts(g.start,g.allDay), en=parisParts(g.end,g.allDay);
+      if(local){
+        const upd={...local, googleId:g.googleId, date:st.date, start:g.allDay?local.start:st.time, end:g.allDay?local.end:en.time};
+        if(upd.date!==local.date || upd.start!==local.start || upd.end!==local.end || upd.googleId!==local.googleId){
+          await put('events',upd,{noSync:true});
+          const inv=S.docs.find(d=>d.id===local.invoiceId); if(inv && inv.status==='brouillon' && upd.date!==local.date) await put('docs',{...inv, eventDate:upd.date});
+        }
+      } else if(!g.cabineId){
+        const isRdv=/^rdv\b/i.test(g.summary); const parts=g.summary.replace(/^rdv\s*[·:-]?\s*/i,'').split(' · ').map(x=>x.trim());
+        const client=S.clients.find(c=>parts.some(x=>x && clientName(c).toLowerCase()===x.toLowerCase()));
+        const place = isRdv ? g.location : (g.location || parts.find(x=>!client || clientName(client).toLowerCase()!==x.toLowerCase()) || g.summary);
+        const ev={id:uid(), kind:isRdv?'rdv':'presta', profileId:activeProfile()?.id||'', clientId:client?.id||'', date:st.date, start:g.allDay?'20:00':st.time, end:g.allDay?'02:00':en.time, eventType:'', location:place||'', notes:g.description||'', googleId:g.googleId, invoiceId:'', fromGoogle:true};
+        if(!isRdv){ const inv=draftFromEvent(ev); ev.invoiceId=inv.id; await put('docs',inv); }
+        await put('events',ev);
+        created++;
+      }
+    }
+    await saveSettings({lastPull:r.now});
+    if(created) toast(created+(created>1?' dates ajoutées':' date ajoutée')+' depuis Google Agenda');
+  }catch(err){ console.warn('Google Agenda', err); }
+  pulling=false;
+}
+function useStore(){ const [,set]=useState(0); useEffect(()=>{ const f=()=>set(v=>v+1); subs.add(f); return ()=>subs.delete(f); },[]); return S; }
+
+/* ---------------- toast ---------------- */
+let toastSet=null;
+function toast(msg){ toastSet && toastSet(msg); }
+function Toast(){ const [m,setM]=useState(''); useEffect(()=>{ toastSet=(x)=>{ setM(x); clearTimeout(Toast.t); Toast.t=setTimeout(()=>setM(''),3200); }; },[]); return m ? html`<div class="toast" role="status">${m}</div>` : null; }
+
+/* ---------------- profil actif ---------------- */
+let currentProfileId = lsGet('cabine-profile') || '';
+function activeProfile(){ return S.profiles.find(p=>p.id===currentProfileId) || S.profiles[0] || null; }
+function setActiveProfile(id){ currentProfileId=id; lsSet('cabine-profile',id); emit(); }
+const vatOn = p => p && p.vatMode==='tva';
+
+/* ---------------- métier : clients, totaux, numérotation ---------------- */
+function clientName(c){ if(!c) return 'Client supprimé'; return c.kind==='entreprise' ? (c.company||'Entreprise sans nom') : ([c.firstName,c.lastName].filter(Boolean).join(' ')||'Client sans nom'); }
+function clientById(id){ return S.clients.find(c=>c.id===id); }
+function docClient(d){ return d.clientSnapshot || clientById(d.clientId); }
+function docProfile(d){ return d.sellerSnapshot || S.profiles.find(p=>p.id===d.profileId); }
+function computeTotals(d, p){
+  const tva = vatOn(p);
+  let ht=0; const vats={};
+  (d.lines||[]).forEach(l=>{ const t=lineTotal(l); ht+=t; if(tva){ const rate=Number(l.vat)||0; vats[rate]=(vats[rate]||0)+t*rate/100; } });
+  ht=r2(ht); Object.keys(vats).forEach(k=>vats[k]=r2(vats[k]));
+  const vat = r2(Object.values(vats).reduce((a,b)=>a+b,0));
+  const ttc = r2(ht+vat); const deposit=r2(d.deposit||0);
+  return {ht, vats, vat, ttc, deposit, due:r2(ttc-deposit), tva};
+}
+function docState(d){
+  if(d.type==='facture'){
+    if(d.status==='brouillon') return {k:'draft',l:'Brouillon'};
+    if(d.status==='payee') return {k:'paid',l:'Payée'};
+    if(d.status==='annulee') return {k:'',l:'Annulée'};
+    if(d.dueDate && d.dueDate < todayISO()) return {k:'late',l:'En retard'};
+    return {k:'due',l:'À encaisser'};
+  }
+  if(d.status==='brouillon') return {k:'draft',l:'Brouillon'};
+  if(d.status==='accepte') return {k:'accepted',l:'Accepté'};
+  if(d.status==='refuse') return {k:'refused',l:'Refusé'};
+  if(d.status==='facture') return {k:'paid',l:'Facturé'};
+  return {k:'due',l:'Envoyé'};
+}
+function lineTotal(l){ const g=(Number(l.qty)||0)*(Number(l.unit)||0); const ds=Number(l.disc)||0; return r2(l.discKind==='€' ? g-ds : g*(1-ds/100)); }
+function numberFormatOf(p,type){ return type==='facture' ? (p?.numberFormat || `${p?.invoicePrefix||'F'}-{AAAA}-{NNNN}`) : (p?.quoteFormat || `${p?.quotePrefix||'D'}-{AAAA}-{NNNN}`); }
+function periodOf(fmt,date){ return fmt.includes('{MM}') ? date.slice(0,7) : date.slice(0,4); }
+function fmtNumber(fmt,date,seq){ const y=date.slice(0,4), m=date.slice(5,7); return fmt.replace('{AAAA}',y).replace('{AA}',y.slice(2)).replace('{MM}',m).replace(/\{(N+)\}/,(_,n)=>String(seq).padStart(n.length,'0')); }
+function nextNumber(d){
+  const p = S.profiles.find(x=>x.id===d.profileId);
+  const fmt = numberFormatOf(p, d.type);
+  const date = d.issueDate||todayISO(); const per = periodOf(fmt,date);
+  let max=0;
+  S.docs.forEach(x=>{ if(x.profileId===d.profileId && x.type===d.type && x.number && (x.seqPeriod||x.seqYear)===per) max=Math.max(max, x.seq||0); });
+  const seq=max+1;
+  return {seq, seqPeriod:per, number:fmtNumber(fmt,date,seq)};
+}
+function dueFrom(issue,p){ const n=Number(p?.paymentDays??30); let d=addDays(issue,n); if(p?.paymentRule==='fdm'){ const x=parseISO(d); d=iso(new Date(x.getFullYear(), x.getMonth()+1, 0)); } return d; }
+function termsLabel(p){ const n=Number(p?.paymentDays??30); if(!n) return 'À réception'; return p?.paymentRule==='fdm' ? `${n} jours fin de mois` : `${n} jours`; }
+const DATE_RE = /\b(\d{1,2})\/(\d{1,2})\/(\d{4})\b/g;
+function shortDate(s){ const d=parseISO(s); return `${d.getDate()}/${String(d.getMonth()+1).padStart(2,'0')}/${d.getFullYear()}`; }
+/* reprend les lignes d'une ancienne facture en remplaçant les anciennes dates par la nouvelle */
+function refreshLines(lines, date, location){
+  return clone(lines||[]).map(l=>{
+    const nl={...l, id:uid()};
+    const all=(l.title+'\n'+(l.description||'')).match(DATE_RE)||[];
+    if(date && all.length){
+      let first=true; const rep = txt => (txt||'').replace(DATE_RE, ()=>{ if(first){ first=false; return shortDate(date); } return '\u0000'; });
+      nl.title = rep(l.title).replace(/\s*\u0000\s*(et|,)?\s*/g,' ').trim();
+      nl.description = rep(l.description).split('\n').filter(x=>x.replace(/[\u0000\s,]/g,'')!=='').map(x=>x.replace(/\s*(et|,)?\s*\u0000/g,'').trim()).join('\n');
+      if(Number(l.qty)===all.length && all.length>1) nl.qty=1;
+      if(location) { nl.title=nl.title.replace(/^([^\n:]{3,40}):(\s*\d)/, location+':$2'); nl.description=nl.description.replace(/^([^\n:]{3,40}):(\s*\d)/m, location+':$2'); }
+    }
+    return nl;
+  });
+}
+function lastFinalDate(d){
+  let last='';
+  S.docs.forEach(x=>{ if(x.profileId===d.profileId && x.type===d.type && x.number && x.issueDate>last) last=x.issueDate; });
+  return last;
+}
+function newDoc(type, extra={}){
+  const p = activeProfile();
+  return {id:uid(), type, status:'brouillon', profileId:p?.id||'', clientId:'', lines:[], notes:'', deposit:0,
+    eventDate:'', eventType:'', eventLocation:'', createdAt:new Date().toISOString(), ...extra};
+}
+function lastInvoiceForClient(clientId, profileId){
+  return S.docs.filter(d=>d.type==='facture' && d.clientId===clientId && d.status!=='annulee' && (!profileId || d.profileId===profileId))
+    .sort((a,b)=>((b.eventDate||b.issueDate||b.createdAt||'') > (a.eventDate||a.issueDate||a.createdAt||'') ? 1 : -1))[0];
+}
+function draftFromEvent(ev){
+  const p = S.profiles.find(x=>x.id===ev.profileId) || activeProfile();
+  const prev = ev.clientId ? lastInvoiceForClient(ev.clientId, p?.id) : null;
+  const lines = prev ? refreshLines(prev.lines, ev.date, ev.location) : [{id:uid(), title:`Prestation DJ${ev.eventType?' – '+ev.eventType:''}`, description:'', qty:1, unit:0, vat: vatOn(p)?20:0}];
+  return newDoc('facture', {profileId:p?.id||'', clientId:ev.clientId||'', eventId:ev.id, eventDate:ev.date, eventType:ev.eventType||'', eventLocation:ev.location||'', lines, notes: prev?.notes||'', copiedFrom: prev?.number||''});
+}
+
+/* ---------------- recherche entreprise (annuaire officiel) ---------------- */
+const NATURE = {'1000':'Entrepreneur individuel','5499':'SARL','5498':'EURL','5710':'SAS','5720':'SASU','5599':'SA','5308':'SNC','6540':'SCI','9220':'Association','9210':'Association','7210':'Commune'};
+function tvaFromSiren(s){ if(!/^\d{9}$/.test(s||'')) return ''; const k=(12+3*(Number(s)%97))%97; return 'FR'+String(k).padStart(2,'0')+s; }
+async function searchCompany(q){
+  let query = q.trim();
+  const m = query.match(/(\d{9})(?:\.html)?\/?$/) || query.replace(/\s/g,'').match(/^(\d{9})(\d{5})?$/);
+  if(/societe\.com|pappers|annuaire-entreprises/.test(query) && m) query=m[1];
+  else if(m) query=m[1];
+  const r = await fetch(`https://recherche-entreprises.api.gouv.fr/search?q=${encodeURIComponent(query)}&per_page=8`);
+  if(!r.ok) throw new Error('http '+r.status);
+  const j = await r.json();
+  return (j.results||[]).map(e=>{ const s=e.siege||{};
+    const street=[s.numero_voie,s.indice_repetition,s.type_voie,s.libelle_voie].filter(Boolean).join(' ');
+    return {company:e.nom_complet||e.nom_raison_sociale||'', siren:e.siren||'', siret:s.siret||'', address: street || (s.adresse||''), cp:s.code_postal||'', city:s.libelle_commune||'', legalForm: NATURE[e.nature_juridique]||'', tva: tvaFromSiren(e.siren), ape:e.activite_principale||'', closed: e.etat_administratif==='C'}; });
+}
+
+/* ---------------- PDF ---------------- */
+function pdfFor(d){
+  const {jsPDF} = window.jspdf;
+  const pdf = new jsPDF({unit:'mm', format:'a4'});
+  const p = docProfile(d) || {}; const c = docClient(d) || {}; const t = computeTotals(d,p);
+  const W=210, H=297, M=16; const ink=[21,26,43], grey=[105,111,130], soft=[244,245,248];
+  const color = hexToRgb(p.color||'#3046c9');
+  const isInv = d.type==='facture'; const draft = d.status==='brouillon';
+  const docLabel = (isInv?'Facture':'Devis') + (d.number ? ' '+d.number : ' (brouillon)');
+  const micro = p.status==='micro'||p.status==='ei';
+  let y=M;
+  // en-tête
+  let logoW=0;
+  if(p.logo){ try{ const pr=pdf.getImageProperties(p.logo); const h=16; logoW=Math.min(48, h*pr.width/pr.height); pdf.addImage(p.logo, pr.fileType||'PNG', W-M-logoW, y-2, logoW, h); }catch(e){} }
+  pdf.setTextColor(...color); pdf.setFont('helvetica','bold'); pdf.setFontSize(20); pdf.text(docLabel, M, y+6);
+  pdf.setTextColor(...ink); pdf.setFont('helvetica','normal'); pdf.setFontSize(10);
+  const sub=[]; if(d.issueDate) sub.push(parseISO(d.issueDate).toLocaleDateString('fr-FR',{day:'2-digit',month:'long',year:'numeric'}));
+  if(draft) sub.push(isInv?'Brouillon – le numéro sera attribué à la finalisation':'Brouillon');
+  if(!isInv && d.validUntil) sub.push('Valable jusqu’au '+fdate(d.validUntil));
+  pdf.text(sub, M, y+12);
+  y += 12 + sub.length*4.6 + 6;
+  // émetteur / destinataire
+  const colW = (W-2*M-8)/2, lx=M, rx=M+colW+8, labW=33;
+  const sellerRows = [];
+  const sName = p.tradeName || p.ownerName || '';
+  sellerRows.push(['Société', sName]);
+  if(p.ownerName) sellerRows.push([isCompany(p.status)?'Représentant':'Votre contact', p.ownerName.toUpperCase()+(micro?' (EI)':'')]);
+  if(isCompany(p.status)) sellerRows.push(['Forme', STATUSES[p.status]+(p.capital?' au capital de '+eur(p.capital):'')]);
+  if(p.address||p.cp||p.city) sellerRows.push(['Adresse', [p.address, `${p.cp||''} ${p.city||''}`.trim()].filter(Boolean).join('\n')]);
+  if(p.country) sellerRows.push(['Pays', p.country]);
+  if(p.siret) sellerRows.push(['N° SIRET', p.siret]); else if(p.siren) sellerRows.push(['N° SIREN', p.siren]);
+  if(isCompany(p.status) && p.rcs) sellerRows.push(['RCS', p.rcs]);
+  if(p.ape) sellerRows.push(['Code d’activité', p.ape]);
+  if(p.tvaNumber && (vatOn(p) || p.showTva)) sellerRows.push(['Numéro de TVA', p.tvaNumber]);
+  if(p.phone) sellerRows.push(['Téléphone', p.phone]);
+  if(p.email) sellerRows.push(['E-mail', p.email]);
+  const ent = c.kind==='entreprise';
+  const clientRows = [];
+  clientRows.push([ent?'Société':'Nom', clientName(c)]);
+  if(ent && c.contact) clientRows.push(['Contact', c.contact]);
+  if(c.address||c.cp||c.city) clientRows.push(['Adresse', [c.address, `${c.cp||''} ${c.city||''}`.trim()].filter(Boolean).join('\n')]);
+  if(c.country) clientRows.push(['Pays', c.country]);
+  if(ent && (c.siret||c.siren)) clientRows.push(['N° d’entreprise', c.siret||c.siren]);
+  if(ent && c.ape) clientRows.push(['Code d’activité', c.ape]);
+  if(ent && c.tva) clientRows.push(['Numéro de TVA', c.tva]);
+  if(c.email) clientRows.push(['E-mail', c.email]);
+  function block(x, title, rows){
+    let yy=y; pdf.setFont('helvetica','bold'); pdf.setFontSize(10.5); pdf.setTextColor(...color); pdf.text(title, x, yy); yy+=2;
+    pdf.setDrawColor(...color); pdf.setLineWidth(.4); pdf.line(x, yy, x+colW, yy); yy+=5;
+    pdf.setFontSize(8.8);
+    rows.forEach(([k,v])=>{ pdf.setFont('helvetica','normal'); pdf.setTextColor(...grey); pdf.text(k+' :', x, yy);
+      pdf.setTextColor(...ink); if(k==='Société'||k==='Nom') pdf.setFont('helvetica','bold');
+      const lines = pdf.splitTextToSize(String(v), colW-labW); pdf.text(lines, x+labW, yy); yy += lines.length*3.9+0.9; });
+    return yy;
+  }
+  const yA = block(lx, 'Émetteur', sellerRows), yB = block(rx, 'Destinataire', clientRows);
+  y = Math.max(yA,yB) + 5;
+  // prestation
+  if(d.eventDate || d.eventType || d.eventLocation){
+    const pl=[]; if(d.eventDate) pl.push('Date : '+fdateLong(d.eventDate)); if(d.eventType) pl.push(d.eventType); if(d.eventLocation) pl.push('Lieu : '+d.eventLocation);
+    pdf.setFillColor(...soft); pdf.roundedRect(M, y, W-2*M, 9, 1.5, 1.5, 'F');
+    pdf.setFont('helvetica','bold'); pdf.setFontSize(8.5); pdf.setTextColor(...grey); pdf.text('PRESTATION', M+4, y+5.8);
+    pdf.setFont('helvetica','normal'); pdf.setFontSize(9.5); pdf.setTextColor(...ink); pdf.text(pdf.splitTextToSize(pl.join('   ·   '), W-2*M-34)[0], M+28, y+5.8);
+    y += 14;
+  }
+  // détail
+  pdf.setFont('helvetica','bold'); pdf.setFontSize(10.5); pdf.setTextColor(...color); pdf.text('Détail', M, y); y+=3;
+  const hasDisc = (d.lines||[]).some(l=>Number(l.disc));
+  const cols = ['Description', t.tva?'Prix unit. HT':'Prix unitaire', 'Quantité'];
+  if(hasDisc) cols.push('Réduction'); if(t.tva) cols.push('TVA'); cols.push(t.tva?'Total HT':'Total');
+  const money = v => { const n=Number(v)||0; return (Math.round(n*100)!==n*100 ? n.toLocaleString('fr-FR',{minimumFractionDigits:2,maximumFractionDigits:4}).replace(/[  ]/g,' ')+' €' : eur(n)); };
+  const body = (d.lines||[]).map(l=>{ const row=[l.title + (l.description ? '\n'+l.description : ''), money(l.unit), String(l.qty).replace('.',',')+(l.qunit?' '+l.qunit:'')];
+    if(hasDisc) row.push(Number(l.disc) ? (l.discKind==='€' ? eur(l.disc) : String(l.disc).replace('.',',')+' %') : '');
+    if(t.tva) row.push((Number(l.vat)||0).toString().replace('.',',')+' %'); row.push(eur(lineTotal(l))); return row; });
+  const cs = {0:{cellWidth:'auto'}}; for(let i=1;i<cols.length;i++) cs[i]={halign:'right', cellWidth: i===cols.length-1?27:(cols[i]==='TVA'?14:24)};
+  pdf.autoTable({startY:y, head:[cols], body, margin:{left:M,right:M, bottom:22}, theme:'plain',
+    styles:{font:'helvetica', fontSize:9.2, textColor:ink, cellPadding:{top:2.6,bottom:2.6,left:2.2,right:2.2}, lineColor:[222,225,233], lineWidth:{bottom:.2}},
+    headStyles:{fillColor:color, textColor:[255,255,255], fontStyle:'bold', fontSize:8.5},
+    columnStyles: cs,
+    didParseCell: h=>{ if(h.section==='head' && h.column.index>0) h.cell.styles.halign='right'; },
+  });
+  y = pdf.lastAutoTable.finalY + 7;
+  // totaux
+  const tl=[];
+  if(t.tva){ tl.push(['Total HT', eur(t.ht)]); Object.keys(t.vats).sort().forEach(k=>tl.push([`TVA ${k.replace('.',',')} %`, eur(t.vats[k])])); tl.push(['Total TTC', eur(t.ttc), true]); }
+  else tl.push(['Total', eur(t.ttc), true]);
+  if(isInv && t.deposit>0){ tl.push(['Acompte déjà versé', '- '+eur(t.deposit)]); tl.push(['Reste à payer', eur(t.due), true]); }
+  if(y + tl.length*6 + 60 > H-22){ pdf.addPage(); y=M; }
+  const yTot=y;
+  tl.forEach(([a,b,bold])=>{ pdf.setFont('helvetica', bold?'bold':'normal'); pdf.setFontSize(bold?11:9.5); pdf.setTextColor(...ink); pdf.text(a, 136, y); pdf.text(b, W-M, y, {align:'right'}); y+= bold?6.5:5.2; });
+  pdf.setFont('helvetica','normal'); pdf.setFontSize(8.5); pdf.setTextColor(...grey);
+  if(!t.tva){ pdf.text('TVA non applicable, art. 293 B du CGI', W-M, y, {align:'right'}); y+=5; }
+  if(p.saleType){ pdf.setTextColor(...ink); pdf.setFontSize(9); pdf.text('Type de vente : '+p.saleType, M, yTot); }
+  y+=3;
+  if(d.notes){ pdf.setTextColor(...ink); pdf.setFontSize(9); const nl=pdf.splitTextToSize(d.notes, W-2*M); pdf.text(nl, M, y); y+=nl.length*4+4; }
+  // conditions + RIB
+  const cond=[];
+  if(isInv){
+    cond.push('Conditions de règlement : '+termsLabel(p)+(!draft && d.dueDate ? ` (échéance le ${fdate(d.dueDate)})` : ''));
+    if(p.paymentMode) cond.push('Mode de règlement : '+p.paymentMode);
+    cond.push('Pas d’escompte pour paiement anticipé.');
+    cond.push('Pénalités de retard : 3 fois le taux d’intérêt légal en vigueur.');
+    if(ent) cond.push('Indemnité forfaitaire pour frais de recouvrement en cas de retard : 40 €.');
+  } else {
+    cond.push('Pour accepter ce devis, retournez-le signé avec la mention « Bon pour accord ».');
+    if(d.depositRequested) cond.push(`Acompte demandé à la réservation : ${eur(d.depositRequested)}.`);
+  }
+  if(p.extraMentions) cond.push(p.extraMentions);
+  const rib=[]; if(isInv && p.iban){ rib.push('IBAN : '+p.iban); if(p.bic) rib.push('BIC : '+p.bic); if(p.ibanHolder) rib.push('Titulaire : '+p.ibanHolder); }
+  const cw = rib.length ? 104 : W-2*M;
+  const condLines = cond.flatMap(s=>pdf.splitTextToSize(s, cw));
+  if(y + condLines.length*4 + 16 > H-22){ pdf.addPage(); y=M; }
+  pdf.setFont('helvetica','bold'); pdf.setFontSize(10.5); pdf.setTextColor(...color); pdf.text('Conditions', M, y); if(rib.length) pdf.text('RIB', M+cw+8, y);
+  y+=5; pdf.setFont('helvetica','normal'); pdf.setFontSize(8.6); pdf.setTextColor(...ink);
+  pdf.text(condLines, M, y); if(rib.length) pdf.text(rib, M+cw+8, y);
+  y += Math.max(condLines.length, rib.length)*3.9 + 6;
+  if(!isInv){ if(y+30>H-22){ pdf.addPage(); y=M; } pdf.setDrawColor(200,203,214); pdf.setLineWidth(.3); pdf.roundedRect(W-M-80, y, 80, 28, 2, 2); pdf.setFontSize(8); pdf.setTextColor(...grey); pdf.text('Date, signature et « Bon pour accord »', W-M-77, y+5); }
+  // pied de page
+  const n = pdf.getNumberOfPages();
+  for(let i=1;i<=n;i++){ pdf.setPage(i); pdf.setFont('helvetica','normal'); pdf.setFontSize(8); pdf.setTextColor(...grey);
+    pdf.text(docLabel, M, H-10); pdf.text(`Page ${i} sur ${n}`, W-M, H-10, {align:'right'});
+    if(draft){ pdf.setTextColor(226,150,70); pdf.text('BROUILLON – sans valeur de facture', W/2, H-10, {align:'center'}); } }
+  return pdf;
+}
+function hexToRgb(h){ const m=(h||'').replace('#','').match(/.{2}/g)||['30','46','c9']; return m.map(x=>parseInt(x,16)); }
+function pdfName(d){ const c=docClient(d); const base = d.number || ((d.type==='facture'?'Facture':'Devis')+'-brouillon'); return `${base} ${clientName(c)}`.replace(/[\\/:*?"<>|]/g,'-')+'.pdf'; }
+async function downloadPdf(d){
+  let blob;
+  try{ blob = pdfFor(d).output('blob'); }catch(e){ toast('Le PDF n’a pas pu être créé : '+e.message); return; }
+  const dl = window.claude?.use ? await window.claude.use('downloads') : null;
+  if(dl){ try{ await dl.save({filename:pdfName(d), data:blob}); toast('PDF enregistré'); }catch(e){ if(e.code!=='declined') toast('Téléchargement impossible ('+e.code+')'); } return; }
+  const a=document.createElement('a'); a.href=URL.createObjectURL(blob); a.download=pdfName(d); a.click(); setTimeout(()=>URL.revokeObjectURL(a.href),4000);
+}
+
+/* ---------------- icônes ---------------- */
+const I = {
+  home:html`<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><path d="M3 11l9-7 9 7v9a1 1 0 01-1 1h-5v-6H9v6H4a1 1 0 01-1-1z"/></svg>`,
+  cal:html`<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><rect x="3" y="5" width="18" height="16" rx="2"/><path d="M3 10h18M8 3v4M16 3v4"/></svg>`,
+  doc:html`<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><path d="M6 3h9l4 4v14H6z"/><path d="M14 3v5h5M9 13h7M9 17h7"/></svg>`,
+  users:html`<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><circle cx="9" cy="8" r="3.5"/><path d="M2.5 20c.8-3.6 3.4-5.5 6.5-5.5s5.7 1.9 6.5 5.5M16 4.8a3.5 3.5 0 010 6.4M18 14.8c1.8.6 3 2.4 3.5 5.2"/></svg>`,
+  more:html`<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><circle cx="5" cy="12" r="1.6"/><circle cx="12" cy="12" r="1.6"/><circle cx="19" cy="12" r="1.6"/></svg>`,
+  box:html`<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><path d="M3 7l9-4 9 4v10l-9 4-9-4z"/><path d="M3 7l9 4 9-4M12 11v10"/></svg>`,
+  id:html`<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><rect x="3" y="5" width="18" height="14" rx="2"/><circle cx="9" cy="12" r="2.5"/><path d="M14 10h4M14 14h4"/></svg>`,
+};
+
+/* ---------------- composants de base ---------------- */
+function Sheet({title, onClose, actions, children, wide}){
+  useEffect(()=>{ const k=e=>{ if(e.key==='Escape') onClose(); }; addEventListener('keydown',k); return ()=>removeEventListener('keydown',k); },[]);
+  return html`<div class="overlay" onClick=${e=>{ if(e.target===e.currentTarget) onClose(); }}>
+    <div class=${'sheet'+(wide?' wide':'')} role="dialog" aria-label=${title}>
+      <div class="sheet-h"><button class="btn ghost sm" onClick=${onClose}>Fermer</button><h2 style="flex:1;text-align:center;font-size:1.05rem">${title}</h2><div class="row">${actions}</div></div>
+      <div class="sheet-b">${children}</div>
+    </div></div>`;
+}
+function F({label, value, onInput, type='text', full, ...rest}){
+  return html`<label class=${'f'+(full?' full':'')}>${label}<input type=${type} value=${value??''} onInput=${e=>onInput(type==='number'?e.target.value:e.target.value)} ...${rest}/></label>`;
+}
+function TA({label, value, onInput, full=true, ...rest}){
+  return html`<label class=${'f'+(full?' full':'')}>${label}<textarea value=${value??''} onInput=${e=>onInput(e.target.value)} ...${rest}></textarea></label>`;
+}
+function Sel({label, value, onChange, options, full}){
+  return html`<label class=${'f'+(full?' full':'')}>${label}<select value=${value??''} onChange=${e=>onChange(e.target.value)}>${options.map(o=>html`<option value=${o[0]}>${o[1]}</option>`)}</select></label>`;
+}
+function useForm(init){ const [f,setF]=useState(()=>clone(init)); const b = k => ({value:f[k], onInput:v=>setF(x=>({...x,[k]:v}))}); return [f,setF,b]; }
+function Confirm({title, text, yes='Confirmer', danger, onYes, onClose}){
+  return html`<${Sheet} title=${title} onClose=${onClose}>
+    <p style="margin:0">${text}</p>
+    <div class="row"><button class=${'btn '+(danger?'danger':'pri')} onClick=${()=>{ onYes(); onClose(); }}>${yes}</button><button class="btn" onClick=${onClose}>Annuler</button></div>
+  <//>`;
+}
+
+/* ---------------- gestion des fenêtres (pile) ---------------- */
+let pushSheet=null;
+function open(kind, props={}){ pushSheet && pushSheet({kind, props, key:uid()}); }
+function Sheets(){
+  const [stack,setStack]=useState([]);
+  useEffect(()=>{ pushSheet = s => setStack(x=>[...x,s]); },[]);
+  const close = key => setStack(x=>x.filter(s=>s.key!==key));
+  const C = {send:SendSheet, booking:BookingView, bookingSettings:BookingSettings, client:ClientForm, product:ProductForm, profile:ProfileForm, doc:DocEditor, event:EventForm, confirm:Confirm, clientView:ClientView, picker:ProductPicker};
+  return stack.map(s=>{ const Comp=C[s.kind]; return html`<${Comp} key=${s.key} ...${s.props} onClose=${()=>close(s.key)} />`; });
+}
+
+/* ---------------- profils ---------------- */
+function emptyProfile(){ return {id:uid(), tradeName:'', ownerName:'', status:'micro', vatMode:'franchise', siret:'', siren:'', ape:'', showTva:false, rcs:'', capital:'', tvaNumber:'', address:'', cp:'', city:'', country:'France', email:'', phone:'', iban:'', bic:'', ibanHolder:'', invoicePrefix:'F', quotePrefix:'D', numberFormat:'', quoteFormat:'', paymentRule:'net', paymentMode:'Virement bancaire', saleType:'Prestations de services', paymentDays:30, quoteDays:30, color:PROFILE_COLORS[S.profiles.length%PROFILE_COLORS.length], logo:'', extraMentions:'', caCeiling:83600}; }
+function ProfileForm({profile, onClose}){
+  const [f,setF,b] = useForm(profile || emptyProfile());
+  const company = isCompany(f.status);
+  const setStatus = v => setF(x=>({...x, status:v, vatMode: isCompany(v) ? 'tva' : x.vatMode}));
+  async function onLogo(e){
+    const file=e.target.files[0]; if(!file) return;
+    const img=new Image(); const url=URL.createObjectURL(file);
+    img.onload=()=>{ const max=360; const k=Math.min(1,max/Math.max(img.width,img.height)); const cv=document.createElement('canvas'); cv.width=Math.round(img.width*k); cv.height=Math.round(img.height*k); cv.getContext('2d').drawImage(img,0,0,cv.width,cv.height); setF(x=>({...x, logo:cv.toDataURL('image/png')})); URL.revokeObjectURL(url); };
+    img.src=url;
+  }
+  async function save(){
+    if(!f.tradeName && !f.ownerName){ toast('Indiquez au moins un nom.'); return; }
+    await put('profiles', f); if(!currentProfileId || !profile) setActiveProfile(f.id); toast('Profil enregistré'); onClose();
+  }
+  return html`<${Sheet} title=${profile?'Modifier le profil':'Nouveau profil'} onClose=${onClose} actions=${html`<button class="btn pri sm" onClick=${save}>Enregistrer</button>`}>
+    <div class="sect"><div class="lab">Identité</div>
+      <div class="fields">
+        <${F} label="Nom commercial (ex. DJ Max Events)" ...${b('tradeName')}/>
+        <${F} label=${company?'Représentant (prénom nom)':'Prénom et nom'} ...${b('ownerName')}/>
+        <${Sel} label="Statut" value=${f.status} onChange=${setStatus} options=${Object.entries(STATUSES)}/>
+        <${Sel} label="TVA" value=${f.vatMode} onChange=${v=>setF(x=>({...x,vatMode:v}))} options=${[['franchise','Pas de TVA (franchise, art. 293 B)'],['tva','Je facture la TVA']]}/>
+        <${F} label="SIRET (14 chiffres)" ...${b('siret')} inputmode="numeric"/>
+        <${F} label="SIREN (9 chiffres, si pas de SIRET)" ...${b('siren')} inputmode="numeric"/>
+        <${F} label="Code d’activité (APE)" ...${b('ape')}/>
+        ${company && html`<${F} label="RCS (ville + n°, ex. Lyon 123 456 789)" ...${b('rcs')}/>`}
+        ${company && html`<${F} label="Capital social (€)" type="number" ...${b('capital')}/>`}
+        <${F} label="N° de TVA intracommunautaire" ...${b('tvaNumber')}/>
+        ${f.vatMode!=='tva' && html`<label class="check" style="align-self:end"><input type="checkbox" checked=${!!f.showTva} onChange=${e=>setF(x=>({...x,showTva:e.target.checked}))}/><span>Afficher le n° de TVA sur les factures</span></label>`}
+      </div></div>
+    <div class="sect"><div class="lab">Coordonnées</div>
+      <div class="fields">
+        <${F} label="Adresse" full ...${b('address')}/>
+        <${F} label="Code postal" ...${b('cp')} inputmode="numeric"/>
+        <${F} label="Ville" ...${b('city')}/>
+        <${F} label="Pays" ...${b('country')}/>
+        <${F} label="E-mail" type="email" ...${b('email')}/>
+        <${F} label="Téléphone" type="tel" ...${b('phone')}/>
+        <${F} label="IBAN" ...${b('iban')}/>
+        <${F} label="BIC" ...${b('bic')}/>
+        <${F} label="Titulaire du compte" ...${b('ibanHolder')}/>
+      </div></div>
+    <div class="sect"><div class="lab">Factures et devis</div>
+      <div class="fields">
+        <${F} label="Format des numéros de facture" ...${b('numberFormat')} placeholder=${(f.invoicePrefix||'F')+'-{AAAA}-{NNNN}'}/>
+        <${F} label="Format des numéros de devis" ...${b('quoteFormat')} placeholder=${(f.quotePrefix||'D')+'-{AAAA}-{NNNN}'}/>
+        <div class="full tiny">{AAAA} = année, {AA} = année sur 2 chiffres, {MM} = mois, {NNNNN} = compteur. Avec {MM}, le compteur repart à 1 chaque mois, sinon chaque année. Prochaine facture : <b>${fmtNumber(f.numberFormat||`${f.invoicePrefix||'F'}-{AAAA}-{NNNN}`, todayISO(), (()=>{ let m=0; const fmt=f.numberFormat||`${f.invoicePrefix||'F'}-{AAAA}-{NNNN}`; const per=periodOf(fmt,todayISO()); S.docs.forEach(x=>{ if(x.profileId===f.id && x.type==='facture' && x.number && (x.seqPeriod||x.seqYear)===per) m=Math.max(m,x.seq||0); }); return m+1; })())}</b></div>
+        <${F} label="Délai de paiement (jours)" type="number" ...${b('paymentDays')}/>
+        <${Sel} label="Calcul de l’échéance" value=${f.paymentRule||'net'} onChange=${v=>setF(x=>({...x,paymentRule:v}))} options=${[['net','X jours après la facture'],['fdm','X jours fin de mois']]}/>
+        <${F} label="Mode de règlement" ...${b('paymentMode')} placeholder="Virement bancaire"/>
+        <${F} label="Type de vente" ...${b('saleType')} placeholder="Prestations de services"/>
+        <${F} label="Validité des devis (jours)" type="number" ...${b('quoteDays')}/>
+        ${f.status==='micro' && html`<${F} label="Plafond de chiffre d’affaires annuel (€)" type="number" ...${b('caCeiling')}/>`}
+        <${TA} label="Mention libre en bas des documents (facultatif)" ...${b('extraMentions')}/>
+      </div>
+    </div>
+    <div class="sect"><div class="lab">Apparence</div>
+      <div class="row">${PROFILE_COLORS.map(c=>html`<button aria-label=${'Couleur '+c} onClick=${()=>setF(x=>({...x,color:c}))} style=${`width:34px;height:34px;border-radius:50%;background:${c};border:3px solid ${f.color===c?'var(--ink)':'transparent'}`}></button>`)}</div>
+      <div class="row">${f.logo && html`<img class="logo-prev" src=${f.logo} alt="Logo"/>`}
+        <label class="btn sm">Choisir un logo<input type="file" accept="image/*" hidden onChange=${onLogo}/></label>
+        ${f.logo && html`<button class="btn ghost sm" onClick=${()=>setF(x=>({...x,logo:''}))}>Retirer</button>`}</div>
+    </div>
+    ${profile && html`<button class="btn danger" onClick=${()=>{ if(S.docs.some(d=>d.profileId===profile.id && d.number)){ toast('Ce profil a des documents numérotés : il doit être conservé.'); return; } open('confirm',{title:'Supprimer ce profil ?', text:'Ses brouillons et ses dates d’agenda resteront mais sans profil.', yes:'Supprimer', danger:true, onYes:()=>{ del('profiles',profile.id); onClose(); }}); }}>Supprimer ce profil</button>`}
+  <//>`;
+}
+
+/* ---------------- clients ---------------- */
+function emptyClient(){ return {id:uid(), kind:'particulier', firstName:'', lastName:'', company:'', contact:'', legalForm:'', siren:'', siret:'', tva:'', ape:'', address:'', cp:'', city:'', country:'France', email:'', phone:'', notes:'', createdAt:new Date().toISOString()}; }
+function CompanySearch({onPick}){
+  const [q,setQ]=useState(''); const [res,setRes]=useState(null); const [err,setErr]=useState(''); const [busy,setBusy]=useState(false);
+  async function go(){ if(q.trim().length<2) return; setBusy(true); setErr(''); try{ const r=await searchCompany(q); setRes(r); if(!r.length) setErr('Aucune entreprise trouvée. Essayez avec le SIRET.'); }catch(e){ setRes(null); setErr('La recherche automatique ne répond pas ici. Elle utilise l’annuaire officiel des entreprises et fonctionnera dans la version installée de l’application. En attendant, remplissez les champs à la main.'); } setBusy(false); }
+  return html`<div class="card stack" style="background:var(--accent-soft);border-color:transparent">
+    <div style="font-weight:600">Remplir automatiquement</div>
+    <div class="row" style="flex-wrap:nowrap"><input class="inp" id="co-search" placeholder="Nom, SIREN, SIRET ou lien societe.com" value=${q} onInput=${e=>setQ(e.target.value)} onKeyDown=${e=>e.key==='Enter'&&(e.preventDefault(),go())}/><button class="btn pri" onClick=${go} disabled=${busy}>${busy?'…':'Chercher'}</button></div>
+    ${err && html`<div class="small muted">${err}</div>`}
+    ${res && res.length>0 && html`<div class="results">${res.map(r=>html`<button onClick=${()=>{ onPick(r); setRes(null); setQ(''); }}><div style="font-weight:600">${r.company}${r.closed?' (fermée)':''}</div><div class="tiny">${[r.legalForm, r.siren && 'SIREN '+r.siren, [r.cp,r.city].filter(Boolean).join(' ')].filter(Boolean).join(' · ')}</div></button>`)}</div>`}
+  </div>`;
+}
+function ClientForm({client, onClose, onSaved, defaultKind}){
+  const [f,setF,b] = useForm(client || {...emptyClient(), kind: defaultKind||'particulier'});
+  const ent = f.kind==='entreprise';
+  async function save(){
+    if(ent ? !f.company : !(f.firstName||f.lastName)){ toast(ent?'Indiquez le nom de l’entreprise.':'Indiquez au moins un nom.'); return; }
+    await put('clients', f); toast('Client enregistré'); onSaved && onSaved(f); onClose();
+  }
+  return html`<${Sheet} title=${client?'Modifier le client':'Nouveau client'} onClose=${onClose} actions=${html`<button class="btn pri sm" onClick=${save}>Enregistrer</button>`}>
+    <div class="seg" role="tablist">${[['particulier','Particulier'],['entreprise','Entreprise']].map(([k,l])=>html`<button class=${f.kind===k?'on':''} onClick=${()=>setF(x=>({...x,kind:k}))}>${l}</button>`)}</div>
+    ${ent && html`<${CompanySearch} onPick=${r=>setF(x=>({...x, company:r.company, siren:r.siren, siret:r.siret, address:r.address, cp:r.cp, city:r.city, legalForm:r.legalForm, tva:r.tva, ape:r.ape}))}/>`}
+    <div class="fields">
+      ${ent ? html`
+        <${F} label="Nom de l’entreprise" full ...${b('company')}/>
+        <${F} label="Forme juridique" ...${b('legalForm')}/>
+        <${F} label="Contact (prénom nom)" ...${b('contact')}/>
+        <${F} label="SIREN" ...${b('siren')} inputmode="numeric"/>
+        <${F} label="SIRET du siège" ...${b('siret')} inputmode="numeric"/>
+        <${F} label="N° de TVA" ...${b('tva')}/>
+        <${F} label="Code d’activité (APE)" ...${b('ape')}/>` : html`
+        <${F} label="Prénom" ...${b('firstName')}/>
+        <${F} label="Nom" ...${b('lastName')}/>`}
+      <${F} label=${ent?'Adresse du siège':'Adresse'} full ...${b('address')}/>
+      <${F} label="Code postal" ...${b('cp')} inputmode="numeric"/>
+      <${F} label="Ville" ...${b('city')}/>
+      <${F} label="Pays" ...${b('country')}/>
+      <${F} label="E-mail" type="email" ...${b('email')}/>
+      <${F} label="Téléphone" type="tel" ...${b('phone')}/>
+      <${TA} label="Notes (préférences musicales, infos utiles…)" ...${b('notes')}/>
+    </div>
+    ${client && html`<button class="btn danger" onClick=${()=>{ if(S.docs.some(d=>d.clientId===client.id && d.number)){ toast('Ce client a des documents numérotés : il doit être conservé.'); return; } open('confirm',{title:'Supprimer ce client ?', text:'Cette action est définitive.', yes:'Supprimer', danger:true, onYes:()=>{ del('clients',client.id); onClose(); }}); }}>Supprimer ce client</button>`}
+  <//>`;
+}
+function ClientView({clientId, onClose}){
+  useStore(); const c = clientById(clientId); if(!c) return null;
+  const docs = S.docs.filter(d=>d.clientId===c.id).sort((a,b)=>(b.createdAt>a.createdAt?1:-1));
+  const evs = S.events.filter(e=>e.clientId===c.id).sort((a,b)=>(b.date>a.date?1:-1));
+  const paid = docs.filter(d=>d.type==='facture'&&d.status==='payee').reduce((a,d)=>a+computeTotals(d,docProfile(d)).ttc,0);
+  return html`<${Sheet} title=${clientName(c)} onClose=${onClose} actions=${html`<button class="btn sm" onClick=${()=>open('client',{client:c})}>Modifier</button>`}>
+    <div class="card stack">
+      <div class="muted small">${c.kind==='entreprise'?[c.legalForm, c.siren&&'SIREN '+c.siren].filter(Boolean).join(' · '):'Particulier'}</div>
+      <div>${c.address}${c.address&&html`<br/>`}${c.cp} ${c.city}</div>
+      <div class="small">${[c.email,c.phone].filter(Boolean).join(' · ')}</div>
+      ${c.notes && html`<div class="small muted" style="white-space:pre-wrap">${c.notes}</div>`}
+      <div class="small">Total encaissé : <b>${eur(paid)}</b></div>
+    </div>
+    <div class="row"><button class="btn pri" onClick=${()=>open('event',{preset:{clientId:c.id}})}>Ajouter une date</button><button class="btn" onClick=${()=>{ const prev=lastInvoiceForClient(c.id); const d=newDoc('facture',{clientId:c.id, lines: prev?refreshLines(prev.lines, todayISO(), ''):[], eventType:prev?.eventType||'', eventDate:prev?todayISO():'', copiedFrom:prev?.number||''}); open('doc',{doc:d, isNew:true}); }}>Nouvelle facture</button><button class="btn" onClick=${()=>open('doc',{doc:newDoc('devis',{clientId:c.id}), isNew:true})}>Nouveau devis</button></div>
+    <div class="sect"><div class="lab">Documents</div>${docs.length? html`<${DocList} docs=${docs}/>` : html`<div class="muted small">Aucun document pour ce client.</div>`}</div>
+    <div class="sect"><div class="lab">Dates</div>${evs.length? html`<${EventList} events=${evs}/>` : html`<div class="muted small">Aucune date.</div>`}</div>
+  <//>`;
+}
+function ClientsView(){
+  useStore(); const [q,setQ]=useState('');
+  const list = S.clients.filter(c=>{ const s=(clientName(c)+' '+(c.city||'')+' '+(c.email||'')).toLowerCase(); return s.includes(q.toLowerCase()); }).sort((a,b)=>clientName(a).localeCompare(clientName(b),'fr'));
+  return html`<div class="wrap">
+    <div class="row sb"><h1>Clients</h1><button class="btn pri" onClick=${()=>open('client')}>Nouveau client</button></div>
+    <input class="inp" id="client-q" placeholder="Rechercher un client" value=${q} onInput=${e=>setQ(e.target.value)}/>
+    ${list.length ? html`<div class="list">${list.map(c=>html`<button class="item" onClick=${()=>open('clientView',{clientId:c.id})}>
+      <div class="grow"><div class="t">${clientName(c)}</div><div class="tiny">${c.kind==='entreprise'?'Entreprise':'Particulier'}${c.city?' · '+c.city:''}</div></div>
+      <span class="tiny">${S.docs.filter(d=>d.clientId===c.id).length} doc.</span></button>`)}</div>`
+    : html`<div class="card empty"><h3>Aucun client${q?' trouvé':''}</h3><p>Ajoutez vos clients une fois, puis retrouvez-les dans vos factures et votre agenda.</p></div>`}
+  </div>`;
+}
+
+/* ---------------- catalogue ---------------- */
+function ProductForm({product, onClose, onSaved}){
+  const p = activeProfile();
+  const [f,setF,b] = useForm(product || {id:uid(), title:'', description:'', unit:0, qunit:'', vat: vatOn(p)?20:0, createdAt:new Date().toISOString()});
+  const showVat = vatOn(p) || Number(f.vat)>0;
+  const ttc = r2((Number(f.unit)||0)*(1+(Number(f.vat)||0)/100));
+  async function save(){ if(!f.title){ toast('Indiquez un titre.'); return; } const o={...f, unit:r2(f.unit), vat:Number(f.vat)||0}; await put('products', o); toast('Produit enregistré'); onSaved&&onSaved(o); onClose(); }
+  return html`<${Sheet} title=${product?'Modifier le produit':'Nouveau produit ou service'} onClose=${onClose} actions=${html`<button class="btn pri sm" onClick=${save}>Enregistrer</button>`}>
+    <div class="fields">
+      <${F} label="Titre du produit ou service" full ...${b('title')} placeholder="ex. Forfait mariage 8 h"/>
+      <${TA} label="Description" ...${b('description')} placeholder="ex. Sono, éclairage, animation micro, de 19 h à 3 h"/>
+      ${showVat ? html`
+        <${F} label="Prix HT (€)" type="number" step="0.01" value=${f.unit} onInput=${v=>setF(x=>({...x,unit:v}))}/>
+        <${Sel} label="TVA" value=${String(f.vat)} onChange=${v=>setF(x=>({...x,vat:Number(v)}))} options=${[['20','20 %'],['10','10 %'],['5.5','5,5 %'],['2.1','2,1 %'],['0','0 %']]}/>
+        <${F} label="Prix TTC (€)" type="number" step="0.01" value=${ttc} onInput=${v=>setF(x=>({...x,unit:r2((Number(v)||0)/(1+(Number(x.vat)||0)/100))}))}/>`
+      : html`<${F} label="Prix (€)" type="number" step="0.01" value=${f.unit} onInput=${v=>setF(x=>({...x,unit:v}))}/>
+        <div class="tiny" style="align-self:end">Pas de TVA avec le profil « ${p?.tradeName||p?.ownerName||'actuel'} ». Le prix est le montant final.</div>`}
+      <${F} label="Unité (facultatif : heures, jours, km…)" ...${b('qunit')}/>
+    </div>
+    ${product && html`<button class="btn danger" onClick=${()=>{ del('products',product.id); onClose(); }}>Supprimer ce produit</button>`}
+  <//>`;
+}
+function CatalogView(){
+  useStore(); const p=activeProfile();
+  const list=[...S.products].sort((a,b)=>a.title.localeCompare(b.title,'fr'));
+  return html`<div class="wrap">
+    <div class="row sb"><h1>Catalogue</h1><button class="btn pri" onClick=${()=>open('product')}>Nouveau produit</button></div>
+    <p class="muted" style="margin:0">Vos forfaits et services enregistrés. Ajoutez-les à une facture en un clic.</p>
+    ${list.length ? html`<div class="list">${list.map(x=>html`<button class="item" onClick=${()=>open('product',{product:x})}>
+      <div class="grow"><div class="t">${x.title}</div><div class="tiny" style="white-space:nowrap;overflow:hidden;text-overflow:ellipsis">${x.description}</div></div>
+      <div style="text-align:right"><div class="amt">${eur(x.unit)}${x.vat?' HT':''}</div>${x.vat? html`<div class="tiny">${eur(x.unit*(1+x.vat/100))} TTC</div>`:''}</div></button>`)}</div>`
+    : html`<div class="card empty"><h3>Catalogue vide</h3><p>Créez par exemple « Forfait mariage », « Location jeu de lumières » ou « Frais de déplacement ».</p></div>`}
+  </div>`;
+}
+function ProductPicker({onPick, onClose}){
+  useStore();
+  return html`<${Sheet} title="Ajouter depuis le catalogue" onClose=${onClose} actions=${html`<button class="btn sm" onClick=${()=>open('product',{onSaved:x=>{ onPick(x); onClose(); }})}>Nouveau</button>`}>
+    ${S.products.length ? html`<div class="list">${S.products.map(x=>html`<button class="item" onClick=${()=>{ onPick(x); onClose(); }}><div class="grow"><div class="t">${x.title}</div><div class="tiny">${x.description}</div></div><span class="amt">${eur(x.unit)}</span></button>`)}</div>` : html`<div class="empty">Votre catalogue est vide. Touchez « Nouveau » pour créer un produit.</div>`}
+  <//>`;
+}
+
+/* ---------------- documents ---------------- */
+function DocList({docs}){
+  return html`<div class="list">${docs.map(d=>{ const st=docState(d); const t=computeTotals(d,docProfile(d)); return html`<button class="item" onClick=${()=>open('doc',{doc:d})}>
+    <div class="grow"><div class="t">${clientName(docClient(d))}</div><div class="tiny">${d.number || (d.type==='facture'?'Facture':'Devis')+' brouillon'}${d.eventDate?' · prestation le '+fdate(d.eventDate):''}${d.eventType?' · '+d.eventType:''}</div></div>
+    <div style="text-align:right;display:flex;flex-direction:column;gap:3px;align-items:flex-end"><span class="amt">${eur(t.ttc)}</span><span class=${'pill '+st.k}>${st.l}</span></div></button>`; })}</div>`;
+}
+function DocsView(){
+  useStore(); const [type,setType]=useState(lsGet('cabine-doctype')||'facture'); const [filter,setFilter]=useState('all');
+  const p=activeProfile();
+  const all = S.docs.filter(d=>d.type===type && (!p || d.profileId===p.id || !d.profileId));
+  const list = all.filter(d=>filter==='all' || docState(d).k===filter || (filter==='due'&&docState(d).k==='late')).sort((a,b)=>((b.issueDate||b.eventDate||b.createdAt) > (a.issueDate||a.eventDate||a.createdAt) ? 1:-1));
+  const filters = type==='facture' ? [['all','Toutes'],['draft','Brouillons'],['due','À encaisser'],['paid','Payées']] : [['all','Tous'],['draft','Brouillons'],['due','Envoyés'],['accepted','Acceptés']];
+  return html`<div class="wrap">
+    <div class="row sb"><h1>${type==='facture'?'Factures':'Devis'}</h1><button class="btn pri" onClick=${()=>open('doc',{doc:newDoc(type), isNew:true})}>${type==='facture'?'Nouvelle facture':'Nouveau devis'}</button></div>
+    <div class="row sb">
+      <div class="seg">${[['facture','Factures'],['devis','Devis']].map(([k,l])=>html`<button class=${type===k?'on':''} onClick=${()=>{ setType(k); setFilter('all'); lsSet('cabine-doctype',k); }}>${l}</button>`)}</div>
+      <div class="seg">${filters.map(([k,l])=>html`<button class=${filter===k?'on':''} onClick=${()=>setFilter(k)}>${l}</button>`)}</div>
+    </div>
+    ${list.length ? html`<${DocList} docs=${list}/>` : html`<div class="card empty"><h3>Rien ici pour l’instant</h3><p>${type==='facture'?'Les dates ajoutées dans l’agenda créent automatiquement une facture brouillon.':'Créez un devis, puis transformez-le en facture quand il est accepté.'}</p></div>`}
+  </div>`;
+}
+function ClientPicker({value, onChange}){
+  useStore();
+  const opts = [...S.clients].sort((a,b)=>clientName(a).localeCompare(clientName(b),'fr'));
+  return html`<div class="row" style="flex-wrap:nowrap;align-items:flex-end">
+    <label class="f" style="flex:1">Client<select value=${value||''} onChange=${e=>onChange(e.target.value)}><option value="">— Choisir un client —</option>${opts.map(c=>html`<option value=${c.id}>${clientName(c)}</option>`)}</select></label>
+    <button class="btn" onClick=${()=>open('client',{onSaved:c=>onChange(c.id)})}>Nouveau</button></div>`;
+}
+function DocEditor({doc, isNew, onClose}){
+  useStore();
+  const live = S.docs.find(x=>x.id===doc.id);
+  const [d,setD] = useState(()=>clone(live||doc));
+  const locked = !!d.number && d.type==='facture';
+  const p = S.profiles.find(x=>x.id===d.profileId) || activeProfile();
+  const t = computeTotals(d, d.sellerSnapshot||p);
+  const isInv = d.type==='facture';
+  const set = (k,v)=>setD(x=>({...x,[k]:v}));
+  const setLine = (i,k,v)=>setD(x=>({...x, lines:x.lines.map((l,j)=>j===i?{...l,[k]:v}:l)}));
+  const addLine = (l)=>setD(x=>({...x, lines:[...(x.lines||[]), {id:uid(), title:l?.title||'', description:l?.description||'', qty:1, unit:l?.unit||0, qunit:l?.qunit||'', disc:0, discKind:'%', vat: vatOn(p)?(l?.vat??20):0}]}));
+  const [tab,setTab] = useState('edit');
+  const dirty = JSON.stringify(d)!==JSON.stringify(live||{});
+  async function save(silent){ const o=clone(d); o.lines=(o.lines||[]).map(l=>({...l, qty:Number(l.qty)||0, unit:Math.round((Number(l.unit)||0)*10000)/10000, vat:Number(l.vat)||0, disc:Number(l.disc)||0})); o.deposit=r2(o.deposit); o.updatedAt=new Date().toISOString(); await put('docs',o); setD(o); if(!silent) toast('Enregistré'); return o; }
+  function finalize(){
+    if(!d.clientId){ toast('Choisissez un client avant de finaliser.'); return; }
+    if(!(d.lines||[]).length){ toast('Ajoutez au moins une ligne.'); return; }
+    if(!p){ toast('Créez d’abord votre profil.'); return; }
+    const today=todayISO(); const last=lastFinalDate({...d});
+    const issue = last>today ? last : today;
+    const n = nextNumber({...d, issueDate:issue});
+    open('confirm',{title: isInv?'Finaliser la facture ?':'Finaliser le devis ?', yes:`Attribuer le n° ${n.number}`,
+      text: isInv ? `La facture recevra le numéro ${n.number}, datée du ${fdate(issue)}. Ensuite elle ne pourra plus être modifiée ni supprimée (c’est la loi). Pour la corriger, il faudra l’annuler.` : `Le devis recevra le numéro ${n.number}. Vous pourrez encore changer son statut ensuite.`,
+      onYes: async()=>{ const o={...clone(d), ...n, issueDate:issue, status: isInv?'finalisee':'envoye', clientSnapshot:clone(clientById(d.clientId)), sellerSnapshot:clone(p),
+        dueDate: isInv ? dueFrom(issue, p) : '', validUntil: !isInv ? addDays(issue, p.quoteDays||30) : ''};
+        await put('docs',o); setD(o); toast(`${isInv?'Facture':'Devis'} ${n.number} créé`); }});
+  }
+  function toInvoice(){
+    const inv = newDoc('facture', {profileId:d.profileId, clientId:d.clientId, lines:clone(d.lines).map(l=>({...l,id:uid()})), eventDate:d.eventDate, eventType:d.eventType, eventLocation:d.eventLocation, notes:d.notes, fromQuote:d.number||'', eventId:d.eventId});
+    put('docs', inv); put('docs', {...clone(d), status:'facture'}); onClose(); open('doc',{doc:inv}); toast('Facture brouillon créée à partir du devis');
+  }
+  function duplicate(){ const c=newDoc(d.type,{profileId:d.profileId, clientId:d.clientId, lines:clone(d.lines).map(l=>({...l,id:uid()})), eventType:d.eventType, eventLocation:d.eventLocation, notes:d.notes}); onClose(); open('doc',{doc:c, isNew:true}); }
+  const title = d.number ? `${isInv?'Facture':'Devis'} ${d.number}` : (isNew?(isInv?'Nouvelle facture':'Nouveau devis'):(isInv?'Facture brouillon':'Devis brouillon'));
+  const st = docState(d);
+  return html`<${Sheet} wide title=${title} onClose=${async()=>{ if(!locked && dirty && (d.clientId||d.lines.length)) await save(true); onClose(); }}
+      actions=${html`<button class="btn sm" onClick=${async()=>{ if(!locked && dirty) await save(true); downloadPdf(d); }}>PDF</button>`}>
+    <div class="seg ed-tabs" style="align-self:center">${[['edit','Modifier'],['preview','Aperçu du PDF']].map(([k,l])=>html`<button class=${tab===k?'on':''} onClick=${()=>setTab(k)}>${l}</button>`)}</div>
+    <div class="ed-grid" data-tab=${tab}>
+    <div class="ed-form">
+    <div class="row sb"><span class=${'pill '+st.k}>${st.l}</span>${d.copiedFrom && !d.number && html`<span class="tiny">Lignes reprises de ${d.copiedFrom}, dates mises à jour</span>`}${d.fromQuote && html`<span class="tiny">Issue du devis ${d.fromQuote}</span>`}</div>
+    ${locked && html`<div class="notice">Cette facture est numérotée : son contenu est figé. Vous pouvez la télécharger, l’envoyer et suivre son paiement.</div>`}
+    ${d.imported && html`<div class="notice small">Facture importée de votre historique.${d.paidAssumed?' Le statut « payée » a été déduit de la date d’échéance. Corrigez-le si besoin.':''}</div>`}
+    <fieldset disabled=${locked} style="border:0;padding:0;margin:0;display:flex;flex-direction:column;gap:16px;min-width:0">
+      <div class="sect"><div class="lab">Client et profil</div>
+        <${ClientPicker} value=${d.clientId} onChange=${v=>set('clientId',v)}/>
+        ${S.profiles.length>1 && html`<${Sel} label="Émis par le profil" value=${d.profileId} onChange=${v=>set('profileId',v)} options=${S.profiles.map(x=>[x.id, x.tradeName||x.ownerName])}/>`}
+      </div>
+      <div class="sect"><div class="lab">Prestation</div>
+        <div class="fields">
+          <${F} label="Date de la prestation" type="date" value=${d.eventDate} onInput=${v=>set('eventDate',v)}/>
+          <label class="f">Type de soirée<input list="evtypes" value=${d.eventType} onInput=${e=>set('eventType',e.target.value)}/></label>
+          <${F} label="Lieu" full value=${d.eventLocation} onInput=${v=>set('eventLocation',v)}/>
+        </div></div>
+      <div class="sect"><div class="lab">Lignes</div>
+        ${(d.lines||[]).map((l,i)=>html`<div class="line-ed" key=${l.id}>
+          <div class="row" style="flex-wrap:nowrap;align-items:flex-end"><label class="f" style="flex:1">Titre<input value=${l.title} onInput=${e=>setLine(i,'title',e.target.value)}/></label>${!locked && html`<button class="btn ghost sm" aria-label="Supprimer la ligne" onClick=${()=>setD(x=>({...x,lines:x.lines.filter((_,j)=>j!==i)}))}>Retirer</button>`}</div>
+          <label class="f">Description<textarea style="min-height:50px" value=${l.description} onInput=${e=>setLine(i,'description',e.target.value)}></textarea></label>
+          <div class="nums">
+            <label class="f">Quantité<input type="number" step="0.5" value=${l.qty} onInput=${e=>setLine(i,'qty',e.target.value)}/></label>
+            <label class="f">${t.tva?'Prix unit. HT':'Prix unitaire'}<input type="number" step="any" value=${l.unit} onInput=${e=>setLine(i,'unit',e.target.value)}/></label>
+            <label class="f">Unité<input value=${l.qunit||''} placeholder="—" onInput=${e=>setLine(i,'qunit',e.target.value)}/></label>
+            ${t.tva && html`<label class="f">TVA %<select value=${String(l.vat)} onChange=${e=>setLine(i,'vat',Number(e.target.value))}>${['20','10','5.5','2.1','0'].map(v=>html`<option value=${v}>${v.replace('.',',')} %</option>`)}</select></label>`}
+            <label class="f">Réduction<span class="row" style="flex-wrap:nowrap;gap:4px"><input class="inp" type="number" step="0.01" value=${l.disc||''} placeholder="0" onInput=${e=>setLine(i,'disc',e.target.value)}/><select class="inp" style="width:auto" value=${l.discKind||'%'} onChange=${e=>setLine(i,'discKind',e.target.value)}><option value="%">%</option><option value="€">€</option></select></span></label>
+            <div class="f" style="font-size:.82rem;font-weight:600;color:var(--ink-2)">Total<div style="font-size:1rem;color:var(--ink);padding:9px 0">${eur(lineTotal(l))}</div></div>
+          </div>
+          ${!locked && !S.products.some(x=>x.title===l.title) && l.title && html`<button class="btn ghost sm" style="align-self:flex-start" onClick=${()=>{ put('products',{id:uid(), title:l.title.replace(DATE_RE,'').trim(), description:(l.description||'').replace(DATE_RE,'').trim(), unit:Number(l.unit)||0, qunit:l.qunit||'', vat:Number(l.vat)||0, createdAt:new Date().toISOString()}); toast('Ajouté au catalogue'); }}>Enregistrer dans le catalogue</button>`}
+        </div>`)}
+        ${!locked && html`<div class="row"><button class="btn" onClick=${()=>open('picker',{onPick:addLine})}>Ajouter depuis le catalogue</button><button class="btn ghost" onClick=${()=>addLine()}>Ligne libre</button></div>`}
+      </div>
+      <div class="sect"><div class="lab">Complément</div>
+        <div class="fields">
+          ${isInv ? html`<${F} label="Acompte déjà versé (€)" type="number" step="0.01" value=${d.deposit} onInput=${v=>set('deposit',v)}/>` : html`<${F} label="Acompte demandé à la réservation (€)" type="number" step="0.01" value=${d.depositRequested} onInput=${v=>set('depositRequested',v)}/>`}
+          <${TA} label="Note affichée sur le document" value=${d.notes} onInput=${v=>set('notes',v)} placeholder="ex. Merci pour votre confiance !"/>
+        </div></div>
+    </fieldset>
+    <div class="card totals">
+      ${t.tva ? html`<div><span>Total HT</span><span>${eur(t.ht)}</span></div>${Object.keys(t.vats).map(k=>html`<div class="muted"><span>TVA ${k} %</span><span>${eur(t.vats[k])}</span></div>`)}<div class="big"><span>Total TTC</span><span>${eur(t.ttc)}</span></div>`
+             : html`<div class="big"><span>Total</span><span>${eur(t.ttc)}</span></div><div class="tiny">TVA non applicable, art. 293 B du CGI</div>`}
+      ${isInv && t.deposit>0 && html`<div class="muted"><span>Acompte versé</span><span>- ${eur(t.deposit)}</span></div><div class="big"><span>Reste à payer</span><span>${eur(t.due)}</span></div>`}
+    </div>
+    <div class="row">
+      ${!d.number && html`<button class="btn" onClick=${()=>save()} disabled=${!dirty && !!live}>Enregistrer le brouillon</button><button class="btn pri" onClick=${finalize}>${isInv?'Finaliser et numéroter':'Finaliser le devis'}</button>`}
+      ${isInv && d.number && d.status!=='payee' && d.status!=='annulee' && html`<button class="btn pri" onClick=${async()=>{ const o={...clone(d), status:'payee', paidAt:todayISO()}; await put('docs',o); setD(o); toast('Facture marquée payée'); }}>Marquer payée</button>`}
+      ${isInv && d.status==='payee' && html`<button class="btn" onClick=${async()=>{ const o={...clone(d), status:'finalisee', paidAt:''}; await put('docs',o); setD(o); }}>Annuler le paiement</button>`}
+      ${!isInv && d.number && d.status==='envoye' && html`<button class="btn pri" onClick=${async()=>{ const o={...clone(d), status:'accepte'}; await put('docs',o); setD(o); }}>Accepté</button><button class="btn" onClick=${async()=>{ const o={...clone(d), status:'refuse'}; await put('docs',o); setD(o); }}>Refusé</button>`}
+      ${!isInv && d.status!=='facture' && d.status!=='refuse' && html`<button class="btn" onClick=${toInvoice}>Transformer en facture</button>`}
+      ${backend.mode==='supabase' && d.number && html`<button class="btn pri" onClick=${()=>open('send',{doc:d})}>${d.sentAt?'Renvoyer par e-mail':'Envoyer par e-mail'}</button>`}
+      <button class="btn" onClick=${()=>downloadPdf(d)}>Télécharger le PDF</button>
+      <button class="btn ghost" onClick=${duplicate}>Dupliquer</button>
+      ${!d.number && live && html`<button class="btn danger" onClick=${()=>open('confirm',{title:'Supprimer ce brouillon ?', text:'Il n’a pas encore de numéro, il peut être supprimé sans problème.', yes:'Supprimer', danger:true, onYes:()=>{ del('docs',d.id); S.events.filter(e=>e.invoiceId===d.id).forEach(e=>put('events',{...e,invoiceId:''})); onClose(); }})}>Supprimer</button>`}
+      ${isInv && d.number && d.status!=='annulee' && html`<button class="btn danger" onClick=${()=>open('confirm',{title:'Annuler cette facture ?', text:'Elle restera dans vos documents avec la mention « Annulée » et son numéro ne sera pas réutilisé. Pensez à établir un avoir si elle a déjà été envoyée.', yes:'Annuler la facture', danger:true, onYes:async()=>{ const o={...clone(d), status:'annulee'}; await put('docs',o); setD(o); }})}>Annuler la facture</button>`}
+    </div>
+    ${d.sentAt ? html`<div class="tiny">Envoyé le ${new Date(d.sentAt).toLocaleDateString('fr-FR')} à ${d.sentTo}</div>` : backend.mode!=='supabase' ? html`<div class="tiny">L’envoi par e-mail est disponible sur la version installée. Ici, téléchargez le PDF et joignez-le à votre e-mail.</div>` : (!d.number ? html`<div class="tiny">Finalisez le document pour pouvoir l’envoyer par e-mail.</div>` : '')}
+    </div>
+    <div class="ed-prev"><div class="tiny">Aperçu en direct</div><${PdfPreview} doc=${d}/></div>
+    </div>
+    <datalist id="evtypes">${EVENT_TYPES.map(x=>html`<option value=${x}/>`)}</datalist>
+  <//>`;
+}
+function PdfPreview({doc}){
+  const box=useRef(null); const [err,setErr]=useState(''); const [busy,setBusy]=useState(true);
+  const key = JSON.stringify(doc) + JSON.stringify(clientById(doc.clientId)||{}) + JSON.stringify(S.profiles.find(p=>p.id===doc.profileId)||{});
+  useEffect(()=>{
+    let cancel=false;
+    const t=setTimeout(async()=>{
+      if(!window.pdfjsLib){ setErr('L’aperçu n’a pas pu se charger. Utilisez le bouton PDF.'); setBusy(false); return; }
+      try{
+        setBusy(true);
+        const data = pdfFor(doc).output('arraybuffer');
+        const task = pdfjsLib.getDocument({data, isEvalSupported:false, disableFontFace:false});
+        const pdf = await task.promise; if(cancel) return;
+        const out=[]; const w = (box.current && box.current.clientWidth) || 560; const dpr = Math.min(2, window.devicePixelRatio||1);
+        for(let i=1;i<=pdf.numPages;i++){
+          const page=await pdf.getPage(i); const v0=page.getViewport({scale:1}); const vp=page.getViewport({scale:(w/v0.width)*dpr});
+          const cv=document.createElement('canvas'); cv.width=Math.floor(vp.width); cv.height=Math.floor(vp.height);
+          await page.render({canvasContext:cv.getContext('2d'), viewport:vp}).promise; out.push(cv);
+        }
+        if(!cancel && box.current){ box.current.replaceChildren(...out); setErr(''); }
+        pdf.destroy();
+      }catch(e){ if(!cancel) setErr('Aperçu impossible : '+e.message); }
+      if(!cancel) setBusy(false);
+    }, 300);
+    return ()=>{ cancel=true; clearTimeout(t); };
+  },[key]);
+  return html`<div>${err && html`<div class="notice warn small">${err}</div>`}<div class="pdf-box" ref=${box} style=${busy?'opacity:.6':''}></div></div>`;
+}
+
+/* ---------------- agenda ---------------- */
+function EventForm({event, preset, onClose}){
+  useStore();
+  const p = activeProfile();
+  const [f,setF,b] = useForm(event || {id:uid(), kind:'presta', profileId:p?.id||'', clientId:'', date:todayISO(), start:'20:00', end:'02:00', eventType:'', location:'', notes:'', invoiceId:'', ...(preset||{})});
+  const [mk,setMk] = useState(!event);
+  const isPresta = f.kind==='presta';
+  const prev = f.clientId ? lastInvoiceForClient(f.clientId, f.profileId) : null;
+  async function save(){
+    if(!f.date){ toast('Choisissez une date.'); return; }
+    let o = clone(f);
+    if(isPresta && mk && !o.invoiceId){ const inv=draftFromEvent(o); o.invoiceId=inv.id; await put('docs',inv); }
+    // garder la facture brouillon liée à jour
+    const inv = S.docs.find(x=>x.id===o.invoiceId);
+    if(inv && inv.status==='brouillon' && event){ await put('docs',{...inv, eventDate:o.date, eventType:o.eventType, eventLocation:o.location, clientId: inv.clientId||o.clientId}); }
+    await put('events', o);
+    toast(isPresta && mk && !event ? 'Date ajoutée, facture brouillon créée' : 'Date enregistrée'); onClose();
+  }
+  const linked = S.docs.find(x=>x.id===f.invoiceId);
+  return html`<${Sheet} title=${event?'Modifier la date':'Nouvelle date'} onClose=${onClose} actions=${html`<button class="btn pri sm" onClick=${save}>Enregistrer</button>`}>
+    <div class="seg">${[['presta','Prestation DJ'],['rdv','Rendez-vous client']].map(([k,l])=>html`<button class=${f.kind===k?'on':''} onClick=${()=>setF(x=>({...x,kind:k}))}>${l}</button>`)}</div>
+    <${ClientPicker} value=${f.clientId} onChange=${v=>setF(x=>({...x,clientId:v}))}/>
+    <div class="fields">
+      <${F} label="Date" type="date" ...${b('date')}/>
+      <${F} label="Début" type="time" ...${b('start')}/>
+      <${F} label="Fin" type="time" ...${b('end')}/>
+      ${isPresta && html`<label class="f">Type de soirée<input list="evtypes2" value=${f.eventType} onInput=${e=>setF(x=>({...x,eventType:e.target.value}))}/></label>`}
+      <${F} label=${isPresta?'Lieu de la soirée':'Lieu ou visio'} full ...${b('location')}/>
+      <${TA} label=${isPresta?'Notes (contact sur place, playlist, déroulé…)':'Notes de préparation du rendez-vous'} ...${b('notes')}/>
+      ${S.profiles.length>1 && html`<${Sel} label="Profil" value=${f.profileId} onChange=${v=>setF(x=>({...x,profileId:v}))} options=${S.profiles.map(x=>[x.id,x.tradeName||x.ownerName])}/>`}
+    </div>
+    ${isPresta && !f.invoiceId && html`<label class="check"><input type="checkbox" checked=${mk} onChange=${e=>setMk(e.target.checked)}/><span>Créer la facture brouillon pour cette date${prev?html`<br/><span class="tiny">Les lignes de la dernière facture de ce client (${prev.number||'brouillon'}, ${eur(computeTotals(prev,docProfile(prev)).ttc)}) seront reprises.</span>`:''}</span></label>`}
+    ${linked && html`<div class="card row sb"><div><div style="font-weight:600">Facture liée</div><div class="tiny">${linked.number||'Brouillon'} · ${eur(computeTotals(linked,docProfile(linked)).ttc)}</div></div><button class="btn sm" onClick=${()=>open('doc',{doc:linked})}>Ouvrir</button></div>`}
+    ${event && html`<button class="btn danger" onClick=${()=>{ const inv=S.docs.find(x=>x.id===event.invoiceId); const draft=inv&&inv.status==='brouillon';
+      open('confirm',{title:'Supprimer cette date ?', text: draft?'La facture brouillon liée sera supprimée aussi.':'La date sera retirée de l’agenda.', yes:'Supprimer', danger:true, onYes:()=>{ if(draft) del('docs',inv.id); del('events',event.id); onClose(); }}); }}>Supprimer cette date</button>`}
+    <datalist id="evtypes2">${EVENT_TYPES.map(x=>html`<option value=${x}/>`)}</datalist>
+  <//>`;
+}
+function EventList({events}){
+  return html`<div class="list">${events.map(e=>{ const dt=parseISO(e.date); const c=clientById(e.clientId); const inv=S.docs.find(x=>x.id===e.invoiceId);
+    return html`<button class="item" onClick=${()=>open('event',{event:e})}>
+      <div class="datechip"><b>${dt.getDate()}</b><span>${MSHORT[dt.getMonth()]}</span></div>
+      <div class="grow"><div class="t">${e.kind==='rdv'?'RDV · ':''}${c?clientName(c):(e.eventType||'Sans client')}</div><div class="tiny">${[e.start&&(e.start+(e.end?'–'+e.end:'')), e.eventType, e.location].filter(Boolean).join(' · ')}</div></div>
+      ${inv ? html`<span class=${'pill '+docState(inv).k}>${docState(inv).l}</span>` : (e.kind==='rdv'? html`<span class="pill">RDV</span>`:'')}
+    </button>`; })}</div>`;
+}
+function AgendaView(){
+  useStore();
+  const [cur,setCur]=useState(()=>{ const d=new Date(); return {y:d.getFullYear(), m:d.getMonth()}; });
+  const [sel,setSel]=useState(todayISO());
+  const first=new Date(cur.y,cur.m,1); const startOff=(first.getDay()+6)%7;
+  const days=[]; for(let i=0;i<42;i++){ const d=new Date(cur.y,cur.m,1-startOff+i); days.push(d); }
+  const byDate={}; S.events.forEach(e=>{ (byDate[e.date]=byDate[e.date]||[]).push(e); });
+  const shift=n=>setCur(c=>{ const d=new Date(c.y,c.m+n,1); return {y:d.getFullYear(), m:d.getMonth()}; });
+  const selEvents=(byDate[sel]||[]).sort((a,b)=>(a.start||'').localeCompare(b.start||''));
+  const upcoming=S.events.filter(e=>e.date>=todayISO()).sort((a,b)=>a.date.localeCompare(b.date)).slice(0,8);
+  const rows = days.slice(35).every(d=>d.getMonth()!==cur.m) ? 35 : 42;
+  return html`<div class="wrap">
+    <div class="row sb"><h1>Agenda</h1><button class="btn pri" onClick=${()=>open('event',{preset:{date:sel}})}>Ajouter une date</button></div>
+    <div class="card stack">
+      <div class="row sb"><button class="btn sm" onClick=${()=>shift(-1)} aria-label="Mois précédent">‹</button><h2 style="text-transform:capitalize">${MONTHS[cur.m]} ${cur.y}</h2><button class="btn sm" onClick=${()=>shift(1)} aria-label="Mois suivant">›</button></div>
+      <div class="cal">${['lun','mar','mer','jeu','ven','sam','dim'].map(d=>html`<div class="dow">${d}</div>`)}
+        ${days.slice(0,rows).map(d=>{ const k=iso(d); const evs=byDate[k]||[]; return html`<button class=${[d.getMonth()!==cur.m&&'out', k===todayISO()&&'today', k===sel&&'sel'].filter(Boolean).join(' ')} onClick=${()=>setSel(k)} aria-label=${fdateLong(k)}>
+          <span>${d.getDate()}</span><span class="dots">${evs.slice(0,3).map(e=>html`<i class=${e.kind==='rdv'?'rdv':''}></i>`)}</span></button>`; })}
+      </div>
+      <div class="row tiny"><span class="row" style="gap:4px"><i style="width:8px;height:8px;border-radius:50%;background:var(--accent);display:inline-block"></i>Prestation</span><span class="row" style="gap:4px"><i style="width:8px;height:8px;border-radius:50%;background:var(--warn);display:inline-block"></i>Rendez-vous</span></div>
+    </div>
+    <div class="sect"><div class="lab" style="text-transform:none;letter-spacing:0;font-size:.95rem;color:var(--ink)">${fdateLong(sel)}</div>
+      ${selEvents.length ? html`<${EventList} events=${selEvents}/>` : html`<div class="muted small">Rien de prévu ce jour-là.</div>`}</div>
+    <div class="sect"><div class="lab">Prochaines dates</div>${upcoming.length? html`<${EventList} events=${upcoming}/>` : html`<div class="muted small">Aucune date à venir.</div>`}</div>
+    <${BookingList}/>
+    ${backend.mode!=='supabase' && html`<div class="notice small">La synchronisation Google Agenda et la page de réservation sont disponibles sur la version installée de Cabine.</div>`}
+  </div>`;
+}
+
+/* ---------------- accueil ---------------- */
+function HomeView(){
+  useStore(); const p=activeProfile(); const y=todayISO().slice(0,4);
+  const mine = S.docs.filter(d=>!p || d.profileId===p.id);
+  const inv = mine.filter(d=>d.type==='facture');
+  const tot = d=>computeTotals(d,docProfile(d)).ttc;
+  const paidYear = inv.filter(d=>d.status==='payee' && (d.paidAt||d.issueDate||'').startsWith(y)).reduce((a,d)=>a+computeTotals(d,docProfile(d)).ht,0);
+  const toCollect = inv.filter(d=>d.number && d.status==='finalisee').reduce((a,d)=>a+computeTotals(d,docProfile(d)).due,0);
+  const late = inv.filter(d=>docState(d).k==='late');
+  const drafts = inv.filter(d=>d.status==='brouillon').sort((a,b)=>(a.eventDate||'').localeCompare(b.eventDate||''));
+  const upcoming = S.events.filter(e=>e.date>=todayISO() && (!p || e.profileId===p.id || !e.profileId)).sort((a,b)=>a.date.localeCompare(b.date)).slice(0,5);
+  const pastDrafts = drafts.filter(d=>d.eventDate && d.eventDate<todayISO());
+  const ceiling = p?.status==='micro' ? Number(p.caCeiling)||83600 : 0;
+  return html`<div class="wrap">
+    <div><h1>Bonjour${p?.ownerName?' '+p.ownerName.split(' ')[0]:''}</h1><div class="muted">${fdateLong(todayISO())}</div></div>
+    <${ImportCard}/>
+    ${pastDrafts.length>0 && html`<div class="notice warn">${pastDrafts.length} prestation${pastDrafts.length>1?'s sont passées':' est passée'} sans facture finalisée. <button class="btn ghost sm" onClick=${()=>open('doc',{doc:pastDrafts[0]})}>Voir</button></div>`}
+    <div class="stats">
+      <div class="card stat"><div class="lab">Encaissé en ${y}</div><div class="val">${eur(paidYear)}</div>${ceiling? html`<div class="meter"><i style=${`width:${Math.min(100,paidYear/ceiling*100)}%`}></i></div><div class="sub">${Math.round(paidYear/ceiling*100)} % du plafond micro (${eur(ceiling)})</div>`: html`<div class="sub">Montant hors taxes</div>`}</div>
+      <div class="card stat"><div class="lab">À encaisser</div><div class="val">${eur(toCollect)}</div><div class="sub">${late.length? late.length+' facture'+(late.length>1?'s':'')+' en retard':'Aucun retard'}</div></div>
+      <div class="card stat"><div class="lab">Brouillons</div><div class="val">${drafts.length}</div><div class="sub">${eur(drafts.reduce((a,d)=>a+tot(d),0))} prévus</div></div>
+    </div>
+    <div class="sect"><div class="row sb"><div class="lab">Prochaines dates</div><a class="btn ghost sm" href="#agenda">Agenda</a></div>
+      ${upcoming.length ? html`<${EventList} events=${upcoming}/>` : html`<div class="card empty"><h3>Aucune date à venir</h3><p>Ajoutez une soirée : la facture brouillon se crée toute seule.</p><button class="btn pri" onClick=${()=>open('event')}>Ajouter une date</button></div>`}</div>
+    ${late.length>0 && html`<div class="sect"><div class="lab">En retard de paiement</div><${DocList} docs=${late}/></div>`}
+  </div>`;
+}
+
+/* ---------------- réglages ---------------- */
+function SettingsView(){
+  useStore();
+  const hasDemo = COLS.some(c=>S[c].some(x=>x.demo));
+  async function exportAll(){
+    const data = JSON.stringify({app:'cabine-facturation', version:1, exportedAt:new Date().toISOString(), ...S}, null, 1);
+    const dl = window.claude?.use ? await window.claude.use('downloads') : null;
+    const name = `sauvegarde-facturation-${todayISO()}.json`;
+    if(dl){ try{ await dl.save({filename:name, data}); toast('Sauvegarde enregistrée'); }catch(e){ if(e.code!=='declined') toast('Impossible ('+e.code+')'); } return; }
+    const a=document.createElement('a'); a.href=URL.createObjectURL(new Blob([data],{type:'application/json'})); a.download=name; a.click();
+  }
+  function importAll(e){
+    const file=e.target.files[0]; if(!file) return; const rd=new FileReader();
+    rd.onload=async()=>{ try{ const j=JSON.parse(rd.result); let n=0; for(const c of COLS){ for(const o of (j[c]||[])){ if(!S[c].some(x=>x.id===o.id)){ await put(c,o); n++; } } } toast(n+' éléments importés'); }catch(err){ toast('Ce fichier n’est pas une sauvegarde valide.'); } };
+    rd.readAsText(file);
+  }
+  return html`<div class="wrap">
+    <h1>Plus</h1>
+    <div class="list">
+      <a class="item" href="#catalogue" style="text-decoration:none;color:inherit">${I.box}<div class="grow"><div class="t">Catalogue</div><div class="tiny">Forfaits et services enregistrés</div></div></a>
+      <a class="item" href="#profils" style="text-decoration:none;color:inherit">${I.id}<div class="grow"><div class="t">Profils</div><div class="tiny">Micro-entreprise, SASU, SARL…</div></div></a>
+    </div>
+    <${ImportCard} force/>
+    ${backend.mode==='supabase' && html`<${GoogleCard}/>`}
+    ${backend.mode==='supabase' && html`<div class="list"><button class="item" onClick=${()=>open('bookingSettings')}>${I.cal}<div class="grow"><div class="t">Page de réservation</div><div class="tiny">Disponibilités et lien à partager</div></div></button></div>`}
+    <div class="card stack"><h2>Vos données</h2>
+      <div class="small muted">${backend.mode==='supabase'?'Vos données sont enregistrées dans votre base Supabase privée. Vous seul y avez accès, sur tous vos appareils.':backend.mode==='cloud'?'Vos données sont enregistrées dans votre espace privé sur claude.ai. Vous seul y avez accès, sur tous vos appareils connectés.':'Vos données sont enregistrées sur cet appareil uniquement.'}</div>
+      <div class="row"><button class="btn" onClick=${exportAll}>Télécharger une sauvegarde</button><label class="btn">Importer une sauvegarde<input type="file" accept=".json,application/json" hidden onChange=${importAll}/></label></div>
+      ${hasDemo ? html`<button class="btn danger" onClick=${async()=>{ for(const c of COLS) for(const o of S[c].filter(x=>x.demo)) await del(c,o.id); toast('Exemples supprimés'); }}>Supprimer les données d’exemple</button>`
+        : html`<button class="btn ghost" style="align-self:flex-start" onClick=${loadDemo}>Charger des données d’exemple pour tester</button>`}
+      ${backend.mode==='supabase' && html`<button class="btn ghost" style="align-self:flex-start" onClick=${async()=>{ await sb.auth.signOut(); location.reload(); }}>Se déconnecter</button>`}
+    </div>
+  </div>`;
+}
+function ProfilesView(){
+  useStore(); const p=activeProfile();
+  return html`<div class="wrap">
+    <div class="row sb"><h1>Profils</h1><button class="btn pri" onClick=${()=>open('profile')}>Nouveau profil</button></div>
+    <p class="muted" style="margin:0">Chaque profil a sa propre numérotation, ses mentions légales et sa TVA.</p>
+    <div class="list">${S.profiles.map(x=>html`<button class="item" onClick=${()=>open('profile',{profile:x})}>
+      <span style=${`width:14px;height:14px;border-radius:50%;background:${x.color};flex:none`}></span>
+      <div class="grow"><div class="t">${x.tradeName||x.ownerName}</div><div class="tiny">${STATUSES[x.status]} · ${vatOn(x)?'TVA':'Sans TVA'}${x.siret?' · SIRET '+x.siret:''}</div></div>
+      ${x.id===p?.id ? html`<span class="pill due">Actif</span>` : html`<span class="btn sm" onClick=${e=>{ e.stopPropagation(); setActiveProfile(x.id); }}>Activer</span>`}</button>`)}</div>
+  </div>`;
+}
+
+/* ---------------- démo ---------------- */
+async function loadDemo(){
+  const y=todayISO().slice(0,4);
+  const p1={...emptyProfile(), id:'demo-p1', demo:true, tradeName:'DJ Exemple Events', ownerName:'Alex Exemple', status:'micro', siret:'000 000 000 00000', address:'1 rue de l’Exemple', cp:'69001', city:'Lyon', email:'contact@exemple.fr', phone:'06 00 00 00 00', iban:'FR76 0000 0000 0000 0000 0000 000', color:'#3046c9'};
+  const p2={...emptyProfile(), id:'demo-p2', demo:true, tradeName:'Exemple Prod SASU', ownerName:'Alex Exemple', status:'sasu', vatMode:'tva', siret:'111 111 111 00011', rcs:'Lyon 111 111 111', capital:1000, tvaNumber:'FR00111111111', address:'2 avenue Exemple', cp:'69002', city:'Lyon', invoicePrefix:'EP', color:'#0f7d6c'};
+  const c1={...emptyClient(), id:'demo-c1', demo:true, firstName:'Camille', lastName:'Exemple', address:'5 chemin des Vignes', cp:'69400', city:'Villefranche', email:'camille@exemple.fr'};
+  const c2={...emptyClient(), id:'demo-c2', demo:true, kind:'entreprise', company:'Bar Exemple SARL', legalForm:'SARL', siren:'222222222', address:'8 quai Exemple', cp:'69005', city:'Lyon', contact:'Sam Gérant'};
+  const pr=[{id:'demo-pr1', demo:true, title:'Forfait mariage', description:'Sono, éclairage, animation micro. De 18 h à 3 h.', unit:1200, vat:0},
+            {id:'demo-pr2', demo:true, title:'Soirée bar 4 h', description:'Mix 22 h – 2 h, matériel du bar.', unit:350, vat:0},
+            {id:'demo-pr3', demo:true, title:'Frais de déplacement', description:'Forfait au-delà de 30 km.', unit:60, vat:0}];
+  const past=addDays(todayISO(),-40);
+  const f1={...newDoc('facture'), id:'demo-f1', demo:true, profileId:p1.id, clientId:c2.id, eventDate:past, eventType:'Bar / Club', eventLocation:'Bar Exemple, Lyon', lines:[{id:uid(), title:'Soirée bar 4 h', description:'Mix 22 h – 2 h', qty:1, unit:350, vat:0}], status:'payee', number:`F-${y}-0001`, seq:1, seqYear:y, issueDate:addDays(past,1), dueDate:addDays(past,31), paidAt:addDays(past,10), clientSnapshot:c2, sellerSnapshot:p1};
+  const e1={id:'demo-e1', demo:true, kind:'presta', profileId:p1.id, clientId:c2.id, date:addDays(todayISO(),9), start:'22:00', end:'02:00', eventType:'Bar / Club', location:'Bar Exemple, Lyon', notes:'Contact sur place : Sam', invoiceId:''};
+  const e2={id:'demo-e2', demo:true, kind:'presta', profileId:p1.id, clientId:c1.id, date:addDays(todayISO(),24), start:'18:00', end:'03:00', eventType:'Mariage', location:'Domaine Exemple, Beaujolais', notes:'Ouverture de bal : valse. Pas de Macarena !', invoiceId:''};
+  const e3={id:'demo-e3', demo:true, kind:'rdv', profileId:p1.id, clientId:c1.id, date:addDays(todayISO(),3), start:'18:30', end:'19:30', eventType:'', location:'Visio', notes:'Préparer la playlist et le déroulé', invoiceId:''};
+  for(const [c,o] of [['profiles',p1],['profiles',p2],['clients',c1],['clients',c2],...pr.map(x=>['products',x]),['docs',f1]]) await put(c,o);
+  const d1=draftFromEvent(e1); d1.demo=true; e1.invoiceId=d1.id; await put('docs',d1);
+  const d2=draftFromEvent(e2); d2.demo=true; d2.lines=[{id:uid(), title:'Forfait mariage', description:'Sono, éclairage, animation micro. De 18 h à 3 h.', qty:1, unit:1200, vat:0},{id:uid(), title:'Frais de déplacement', description:'Forfait au-delà de 30 km.', qty:1, unit:60, vat:0}]; d2.deposit=300; e2.invoiceId=d2.id; await put('docs',d2);
+  for(const e of [e1,e2,e3]) await put('events',e);
+  setActiveProfile(p1.id); toast('Données d’exemple chargées');
+}
+
+
+/* ---------------- import de l'historique ---------------- */
+function ImportCard({force}){
+  useStore();
+  const [state,setState]=useState({busy:false, done:0, total:0, msg:''});
+  const [info,setInfo]=useState(null);
+  const already = S.profiles.some(p=>p.id==='mathlows');
+  useEffect(()=>{ if(already || (!force && lsGet('cabine-import-hidden')==='1')) return; fetch('import-mathlows.json').then(r=>r.ok?r.json():null).then(j=>setInfo(j)).catch(()=>{}); },[already]);
+  if(already || !info || (!force && lsGet('cabine-import-hidden')==='1')) return null;
+  async function run(){
+    const items=[]; for(const c of COLS) for(const o of (info[c]||[])) if(!S[c].some(x=>x.id===o.id)) items.push([c,o]);
+    setState({busy:true, done:0, total:items.length, msg:''});
+    // le profil en dernier : la carte disparaît quand tout est importé
+    items.sort((a,b)=>(a[0]==='profiles')-(b[0]==='profiles'));
+    let done=0;
+    for(const [c,o] of items){
+      let ok=false, tries=0;
+      while(!ok && tries<5){ try{ await backend.put(c,o); ok=true; }catch(e){ tries++; await new Promise(r=>setTimeout(r, 800*tries)); } }
+      if(!ok){ setState(s=>({...s, busy:false, msg:'L’import s’est arrêté. Touchez à nouveau « Importer » pour reprendre là où il en était.'})); return; }
+      const i=S[c].findIndex(x=>x.id===o.id); if(i<0) S[c]=[...S[c],o]; done++;
+      if(done%10===0 || done===items.length){ setState(s=>({...s, done})); emit(); }
+    }
+    setActiveProfile('mathlows'); toast('Historique importé'); emit();
+  }
+  const nInv=(info.docs||[]).length, nCl=(info.clients||[]).length, nPr=(info.products||[]).length;
+  return html`<div class="card stack" style="border-color:var(--accent)">
+    <div style="font-weight:600">Votre historique MATHLOWS est prêt à être importé</div>
+    <div class="small muted">1 profil, ${nCl} clients, ${nPr} produits du catalogue et ${nInv} factures (de ${fdate(info.docs[0]?.issueDate)} à ${fdate(info.docs[nInv-1]?.issueDate)}). La numérotation continuera à la suite : prochaine facture ${fmtNumber('F{AA}{MM}{NNNNN}', todayISO(), 1+Math.max(0,...info.docs.filter(d=>d.seqPeriod===todayISO().slice(0,7)).map(d=>d.seq)))}.</div>
+    ${state.busy ? html`<div><div class="meter"><i style=${`width:${state.total?state.done/state.total*100:0}%`}></i></div><div class="tiny" style="margin-top:6px">${state.done} / ${state.total} éléments…</div></div>`
+      : html`<div class="row"><button class="btn pri" onClick=${run}>Importer</button><button class="btn ghost" onClick=${()=>{ lsSet('cabine-import-hidden','1'); emit(); }}>Plus tard</button></div>`}
+    ${state.msg && html`<div class="small" style="color:var(--bad)">${state.msg}</div>`}
+  </div>`;
+}
+
+/* ---------------- connexion (site installé) ---------------- */
+function Login(){
+  const [busy,setBusy]=useState(false);
+  async function go(){
+    setBusy(true);
+    const {error}=await sb.auth.signInWithOAuth({provider:'google', options:{redirectTo: location.origin+location.pathname,
+      scopes:'https://www.googleapis.com/auth/calendar https://www.googleapis.com/auth/gmail.send',
+      queryParams:{access_type:'offline', prompt:'consent'}}});
+    if(error){ toast('Connexion impossible : '+error.message); setBusy(false); }
+  }
+  return html`<div class="wrap" style="max-width:520px;padding-top:40px">
+    <div class="brand"><span class="disc"></span>Cabine</div>
+    <h1>Connectez-vous</h1>
+    <p class="muted" style="margin:0">Utilisez votre compte Google. Cabine pourra alors envoyer vos factures depuis votre Gmail et synchroniser votre Google Agenda. Vos données restent privées.</p>
+    <button class="btn pri" style="align-self:flex-start" onClick=${go} disabled=${busy}>${busy?'Redirection…':'Se connecter avec Google'}</button>
+    ${backend.note && html`<div class="notice warn small">${backend.note}</div>`}
+  </div>`;
+}
+
+/* ---------------- envoi par e-mail ---------------- */
+function mailTemplate(d){
+  const c=docClient(d)||{}; const p=docProfile(d)||{}; const t=computeTotals(d,p);
+  const hello = c.kind==='entreprise' ? (c.contact ? 'Bonjour '+c.contact.split(' ')[0]+',' : 'Bonjour,') : ('Bonjour'+(c.firstName?' '+c.firstName:'')+',');
+  const what = d.type==='facture' ? `la facture ${d.number} d’un montant de ${eur(t.due)}` : `le devis ${d.number} d’un montant de ${eur(t.ttc)}`;
+  const presta = d.eventDate ? ` pour la prestation du ${fdate(d.eventDate)}${d.eventLocation?' ('+d.eventLocation+')':''}` : '';
+  const pay = d.type==='facture' && d.dueDate ? `\n\nÉchéance de paiement : ${fdate(d.dueDate)}.${p.iban?' Règlement par virement (coordonnées bancaires sur la facture).':''}` : (d.type==='devis'?'\n\nN’hésitez pas à me contacter pour toute question. Pour valider, il suffit de me retourner le devis signé.':'');
+  return {subject:`${d.type==='facture'?'Facture':'Devis'} ${d.number} – ${p.tradeName||p.ownerName||''}`.trim(),
+    text:`${hello}\n\nVeuillez trouver ci-joint ${what}${presta}.${pay}\n\nMerci pour votre confiance,\n${p.ownerName||''}${p.tradeName?'\n'+p.tradeName:''}${p.phone?'\n'+p.phone:''}`};
+}
+function SendSheet({doc, onClose}){
+  const c=docClient(doc)||{}; const tpl=mailTemplate(doc);
+  const [f,setF,b]=useForm({to:c.email||'', subject:tpl.subject, text:tpl.text});
+  const [busy,setBusy]=useState(false);
+  async function send(){
+    if(!f.to){ toast('Indiquez l’adresse du destinataire.'); return; }
+    setBusy(true);
+    try{
+      const base64 = pdfFor(doc).output('datauristring').split(',')[1];
+      const p=docProfile(doc)||{};
+      await gcall('send',{to:f.to, subject:f.subject, text:f.text, fromName:p.tradeName||p.ownerName||'', attachments:[{filename:pdfName(doc), base64}]});
+      const cur=S.docs.find(x=>x.id===doc.id)||doc;
+      await put('docs',{...cur, sentAt:new Date().toISOString(), sentTo:f.to});
+      if(c.id && !c.email && clientById(c.id)) await put('clients',{...clientById(c.id), email:f.to});
+      toast('E-mail envoyé à '+f.to); onClose();
+    }catch(e){ toast(e.message==='google_not_connected' ? 'Reconnectez votre compte Google (Plus > Se déconnecter, puis se reconnecter).' : 'Envoi impossible : '+e.message); setBusy(false); }
+  }
+  return html`<${Sheet} title="Envoyer par e-mail" onClose=${onClose} actions=${html`<button class="btn pri sm" onClick=${send} disabled=${busy}>${busy?'Envoi…':'Envoyer'}</button>`}>
+    <div class="fields">
+      <${F} label="Destinataire (plusieurs adresses : séparez par une virgule)" full type="email" ...${b('to')}/>
+      <${F} label="Objet" full ...${b('subject')}/>
+      <${TA} label="Message" ...${b('text')} style="min-height:220px"/>
+    </div>
+    <div class="tiny">Le PDF « ${pdfName(doc)} » sera joint. L’e-mail part de votre adresse Gmail${backend.user?.email?' ('+backend.user.email+')':''} et apparaîtra dans vos messages envoyés.</div>
+  <//>`;
+}
+
+/* ---------------- demandes de rendez-vous ---------------- */
+const fdt = iso => new Date(iso).toLocaleString('fr-FR',{timeZone:'Europe/Paris',weekday:'long',day:'numeric',month:'long',hour:'2-digit',minute:'2-digit'});
+const bookingName = f => [f.firstName,f.lastName].filter(Boolean).join(' ') || f.company || 'Client';
+function bookingLink(extra){ const base=location.origin+location.pathname.replace(/[^/]*$/,'')+'reserver.html'; return extra ? base+'?'+extra : base+'?u='+(backend.user?.id||''); }
+function BookingList(){
+  useStore();
+  const open_ = S.bookings.filter(b=>b.status==='pending' || b.status==='proposed');
+  if(backend.mode!=='supabase') return null;
+  return html`<div class="sect"><div class="row sb"><div class="lab">Demandes de rendez-vous</div><button class="btn ghost sm" onClick=${()=>open('bookingSettings')}>Disponibilités</button></div>
+    ${open_.length ? html`<div class="list">${open_.map(b=>html`<button class="item" onClick=${()=>open('booking',{id:b.id})}>
+      <div class="grow"><div class="t">${bookingName(b.form||{})}</div><div class="tiny">${b.slot_start?fdt(b.slot_start):''}${b.form?.eventType?' · '+b.form.eventType:''}</div></div>
+      <span class=${'pill '+(b.status==='pending'?'draft':'due')}>${b.status==='pending'?(b.form?.picked?'Créneau choisi':'À valider'):'Créneaux proposés'}</span></button>`)}</div>`
+      : html`<div class="muted small">Aucune demande en attente. Partagez votre lien de réservation depuis « Disponibilités ».</div>`}
+  </div>`;
+}
+function BookingView({id, onClose}){
+  useStore(); const b=S.bookings.find(x=>x.id===id); const [props,setProps]=useState([{date:'',time:''}]); const [busy,setBusy]=useState(false);
+  if(!b) return null; const f=b.form||{}; const st=settings(); const dur=Number(st.booking?.duration)||60;
+  const answers = [['Type',f.kind==='entreprise'?'Entreprise':'Particulier'],['Société',f.company],['SIRET',f.siret],['Nom',[f.firstName,f.lastName].filter(Boolean).join(' ')],['Adresse',[f.address,[f.cp,f.city].filter(Boolean).join(' ')].filter(Boolean).join(', ')],['E-mail',f.email],['Téléphone',f.phone],['Événement',f.eventType],['Date prévue',f.eventDate&&fdate(f.eventDate)],['Lieu',f.eventLocation],['Invités',f.guests],['Musique',f.music],['Message',f.message]].filter(x=>x[1]);
+  async function mail(to, subject, text){ try{ await gcall('send',{to, subject, text, fromName:activeProfile()?.tradeName||''}); }catch(e){ toast('E-mail non envoyé : '+e.message); } }
+  async function accept(){
+    setBusy(true);
+    let client = S.clients.find(c=>c.email && f.email && c.email.toLowerCase()===f.email.toLowerCase());
+    if(!client){ client={...emptyClient(), kind:f.kind==='entreprise'?'entreprise':'particulier', firstName:f.firstName||'', lastName:f.lastName||'', company:f.company||'', contact:f.kind==='entreprise'?[f.firstName,f.lastName].filter(Boolean).join(' '):'', siret:(f.siret||'').replace(/\s/g,''), siren:(f.siret||'').replace(/\s/g,'').slice(0,9), address:f.address||'', cp:f.cp||'', city:f.city||'', email:f.email||'', phone:f.phone||'', fromBooking:true}; await put('clients',client); }
+    const s=parisParts(b.slot_start), e=parisParts(b.slot_end);
+    const notes = ['Préparation du rendez-vous :', ...answers.filter(a=>!['Type','Société','SIRET','Nom','Adresse','E-mail','Téléphone'].includes(a[0])).map(a=>`• ${a[0]} : ${a[1]}`)].join('\n');
+    await put('events',{id:uid(), kind:'rdv', profileId:activeProfile()?.id||'', clientId:client.id, date:s.date, start:s.time, end:e.time, eventType:f.eventType||'', location:st.booking?.place||'', notes, invoiceId:'', bookingId:b.id});
+    await sb.from('booking_requests').update({status:'accepted'}).eq('id',b.id);
+    await mail(f.email, 'Rendez-vous confirmé', `Bonjour ${f.firstName||bookingName(f)},\n\nJe vous confirme notre rendez-vous le ${fdt(b.slot_start)}${st.booking?.place?' ('+st.booking.place+')':''}.\n\nÀ très vite,\n${activeProfile()?.ownerName||''}`);
+    toast('Rendez-vous validé et ajouté à l’agenda'); onClose();
+  }
+  async function propose(){
+    const list=props.filter(x=>x.date&&x.time).map(x=>{ const st0=new Date(`${x.date}T${x.time}:00`); return {start:st0.toISOString(), end:new Date(st0.getTime()+dur*60000).toISOString()}; });
+    if(!list.length){ toast('Ajoutez au moins un créneau.'); return; }
+    setBusy(true);
+    await sb.from('booking_requests').update({status:'proposed', proposals:list, slot_start:null, slot_end:null}).eq('id',b.id);
+    await mail(f.email, 'Proposition de créneaux pour notre rendez-vous', `Bonjour ${f.firstName||bookingName(f)},\n\nLe créneau demandé n’est malheureusement pas disponible. Je vous propose :\n${list.map(x=>'• '+fdt(x.start)).join('\n')}\n\nChoisissez celui qui vous convient ici :\n${bookingLink('t='+b.token)}\n\nÀ bientôt,\n${activeProfile()?.ownerName||''}`);
+    toast('Créneaux proposés au client'); onClose();
+  }
+  async function decline(){ setBusy(true); await sb.from('booking_requests').update({status:'declined'}).eq('id',b.id); await mail(f.email,'Votre demande de rendez-vous',`Bonjour ${f.firstName||bookingName(f)},\n\nJe ne suis malheureusement pas disponible pour ce rendez-vous. N’hésitez pas à refaire une demande sur un autre créneau :\n${bookingLink()}\n\nBien à vous,\n${activeProfile()?.ownerName||''}`); toast('Demande refusée'); onClose(); }
+  return html`<${Sheet} title=${bookingName(f)} onClose=${onClose}>
+    ${b.slot_start && html`<div class="card"><div class="tiny">Créneau ${f.picked?'choisi par le client':'demandé'}</div><div style="font-weight:600;font-size:1.05rem">${fdt(b.slot_start)}</div></div>`}
+    <div class="list">${answers.map(([k,v])=>html`<div class="item"><div class="tiny" style="width:90px;flex:none">${k}</div><div class="grow" style="white-space:pre-wrap">${v}</div></div>`)}</div>
+    ${b.status==='pending' && html`<div class="row"><button class="btn pri" disabled=${busy} onClick=${accept}>Valider ce créneau</button><button class="btn danger" disabled=${busy} onClick=${decline}>Refuser</button></div>`}
+    <div class="sect"><div class="lab">${b.status==='proposed'?'Créneaux déjà proposés':'Proposer d’autres créneaux'}</div>
+      ${b.status==='proposed' ? html`<div class="small">${(b.proposals||[]).map(x=>html`<div>• ${fdt(x.start)}</div>`)}</div><div class="tiny">En attente du choix du client.</div>` : html`
+      ${props.map((x,i)=>html`<div class="row" style="flex-wrap:nowrap"><input class="inp" type="date" value=${x.date} onInput=${e=>setProps(p=>p.map((y,j)=>j===i?{...y,date:e.target.value}:y))}/><input class="inp" type="time" value=${x.time} onInput=${e=>setProps(p=>p.map((y,j)=>j===i?{...y,time:e.target.value}:y))}/></div>`)}
+      <div class="row">${props.length<3 && html`<button class="btn ghost sm" onClick=${()=>setProps(p=>[...p,{date:'',time:''}])}>Ajouter un créneau</button>`}<button class="btn" disabled=${busy} onClick=${propose}>Envoyer la proposition</button></div>
+      <div class="tiny">Le client reçoit un e-mail avec un lien pour choisir l’un de ces créneaux (durée : ${dur} min).</div>`}
+    </div>
+  <//>`;
+}
+const WD = [['1','Lundi'],['2','Mardi'],['3','Mercredi'],['4','Jeudi'],['5','Vendredi'],['6','Samedi'],['0','Dimanche']];
+function BookingSettings({onClose}){
+  const [f,setF]=useState(()=>{ const def={enabled:false, title:'Prendre rendez-vous avec '+(activeProfile()?.tradeName||''), intro:'Choisissez un créneau pour que nous parlions de votre événement.', place:'Téléphone ou visio', duration:45, noticeHours:24, horizonDays:30, weekly:{'1':[{from:'18:00',to:'20:00'}],'3':[{from:'18:00',to:'20:00'}]}};
+    const cur=clone(settings().booking||{}); return {...def, ...cur, weekly:cur.weekly||def.weekly}; });
+  const set=(k,v)=>setF(x=>({...x,[k]:v}));
+  const setDay=(d,list)=>setF(x=>({...x, weekly:{...x.weekly, [d]:list}}));
+  async function save(){
+    const data={...f, calendarId:settings().calendarId||''};
+    const {error}=await sb.from('booking_settings').upsert({user_id:backend.user.id, data, updated_at:new Date().toISOString()});
+    if(error){ toast('Enregistrement impossible : '+error.message); return; }
+    await saveSettings({booking:f}); toast('Disponibilités enregistrées'); onClose();
+  }
+  const link=bookingLink();
+  return html`<${Sheet} title="Page de réservation" onClose=${onClose} actions=${html`<button class="btn pri sm" onClick=${save}>Enregistrer</button>`}>
+    <label class="check"><input type="checkbox" checked=${f.enabled} onChange=${e=>set('enabled',e.target.checked)}/><span>Page de réservation active</span></label>
+    <div class="card stack"><div class="tiny">Votre lien à envoyer aux clients (ou à mettre sur Instagram) :</div><div style="word-break:break-all;font-weight:600">${link}</div>
+      <button class="btn sm" style="align-self:flex-start" onClick=${()=>navigator.clipboard.writeText(link).then(()=>toast('Lien copié'),()=>toast('Sélectionnez le lien pour le copier'))}>Copier le lien</button></div>
+    <div class="fields">
+      <${F} label="Titre de la page" full value=${f.title} onInput=${v=>set('title',v)}/>
+      <${TA} label="Texte d’accueil" value=${f.intro} onInput=${v=>set('intro',v)}/>
+      <${F} label="Lieu du rendez-vous" value=${f.place} onInput=${v=>set('place',v)}/>
+      <${Sel} label="Durée d’un rendez-vous" value=${String(f.duration)} onChange=${v=>set('duration',Number(v))} options=${[['15','15 min'],['30','30 min'],['45','45 min'],['60','1 h'],['90','1 h 30']]}/>
+      <${F} label="Délai minimum avant un rendez-vous (heures)" type="number" value=${f.noticeHours} onInput=${v=>set('noticeHours',v)}/>
+      <${F} label="Réservable jusqu’à (jours à l’avance)" type="number" value=${f.horizonDays} onInput=${v=>set('horizonDays',v)}/>
+    </div>
+    <div class="sect"><div class="lab">Mes disponibilités chaque semaine</div>
+      ${WD.map(([d,l])=>{ const list=f.weekly[d]||[]; return html`<div class="line-ed"><div class="row sb"><b>${l}</b><button class="btn ghost sm" onClick=${()=>setDay(d,[...list,{from:'18:00',to:'20:00'}])}>Ajouter une plage</button></div>
+        ${list.length? list.map((r,i)=>html`<div class="row" style="flex-wrap:nowrap"><input class="inp" type="time" value=${r.from} onInput=${e=>setDay(d,list.map((x,j)=>j===i?{...x,from:e.target.value}:x))}/><span>à</span><input class="inp" type="time" value=${r.to} onInput=${e=>setDay(d,list.map((x,j)=>j===i?{...x,to:e.target.value}:x))}/><button class="btn ghost sm" onClick=${()=>setDay(d,list.filter((_,j)=>j!==i))}>Retirer</button></div>`) : html`<div class="tiny">Indisponible</div>`}</div>`; })}
+      <div class="tiny">Les créneaux déjà occupés (dates de l’agenda, rendez-vous, événements de votre Google Agenda) ne sont jamais proposés.</div>
+    </div>
+  <//>`;
+}
+function GoogleCard(){
+  useStore(); const st=settings(); const [cals,setCals]=useState(null); const [status,setStatus]=useState(null);
+  useEffect(()=>{ gcall('status').then(setStatus).catch(e=>setStatus({connected:false, error:e.message})); gcall('calendars').then(r=>setCals(r.items)).catch(()=>setCals([])); },[]);
+  async function createCal(){ try{ const r=await gcall('create-calendar',{name:'DJ'}); setCals(c=>[...(c||[]),{id:r.id,name:r.name}]); await saveSettings({calendarId:r.id, calendarSync:true}); toast('Agenda « DJ » créé'); syncAll(); }catch(e){ toast(e.message); } }
+  async function syncAll(){ let n=0; for(const e of S.events.filter(x=>x.date>=addDays(todayISO(),-30))){ await pushEvent(e); n++; } await pullGoogle(); toast(n+' dates envoyées vers Google Agenda'); }
+  return html`<div class="card stack"><h2>Google</h2>
+    <div class="small">${status==null?'Vérification…': status.connected ? html`Connecté : <b>${status.email}</b> (Gmail et Agenda)` : html`<span style="color:var(--bad)">Google n’est pas relié (${status.error}). Déconnectez-vous puis reconnectez-vous.</span>`}</div>
+    <label class="f">Agenda à synchroniser<select value=${st.calendarId||''} onChange=${e=>saveSettings({calendarId:e.target.value, calendarSync:!!e.target.value})}><option value="">— Aucun —</option>${(cals||[]).map(c=>html`<option value=${c.id}>${c.name}${c.primary?' (principal)':''}</option>`)}</select></label>
+    <div class="row">${!(cals||[]).some(c=>c.name==='DJ') && html`<button class="btn sm" onClick=${createCal}>Créer un agenda « DJ »</button>`}${st.calendarId && html`<button class="btn sm" onClick=${syncAll}>Synchroniser maintenant</button>`}</div>
+    <div class="tiny">Chaque date ajoutée dans Cabine apparaît dans cet agenda (titre : lieu · client). Une date ajoutée dans cet agenda depuis votre téléphone arrive dans Cabine avec sa facture brouillon. Le widget Google Agenda de votre Pixel affiche alors vos dates.</div>
+  </div>`;
+}
+
+/* ---------------- accueil sans profil ---------------- */
+function Onboarding(){
+  return html`<div class="wrap" style="max-width:560px;padding-top:24px">
+    <div class="brand"><span class="disc"></span>Cabine</div>
+    <h1>Votre facturation de DJ, au même endroit</h1>
+    <p class="muted" style="margin:0">Devis et factures numérotés, clients, catalogue de forfaits, et un agenda qui prépare la facture de chaque soirée.</p>
+    <div class="card stack">
+      <div style="font-weight:600">Pour commencer, créez votre profil</div>
+      <div class="small muted">Nom, statut (micro-entreprise, SASU…), SIRET et coordonnées. Ces informations apparaissent sur vos factures. Vous pourrez ajouter d’autres profils ensuite.</div>
+      <div class="row"><button class="btn pri" onClick=${()=>open('profile')}>Créer mon profil</button><button class="btn" onClick=${loadDemo}>Essayer avec des exemples</button></div>
+    </div>
+    <${ImportCard}/>
+    ${backend.note && html`<div class="notice warn small">${backend.note}</div>`}
+  </div>`;
+}
+
+/* ---------------- application ---------------- */
+const NAV=[['accueil','Accueil',I.home],['agenda','Agenda',I.cal],['documents','Factures',I.doc],['clients','Clients',I.users],['plus','Plus',I.more]];
+function App(){
+  useStore();
+  const [route,setRoute]=useState(location.hash.slice(1)||'accueil');
+  useEffect(()=>{ const f=()=>{ setRoute(location.hash.slice(1)||'accueil'); window.scrollTo(0,0); }; addEventListener('hashchange',f); return ()=>removeEventListener('hashchange',f); },[]);
+  const p=activeProfile();
+  const views={accueil:HomeView, agenda:AgendaView, documents:DocsView, clients:ClientsView, plus:SettingsView, catalogue:CatalogView, profils:ProfilesView};
+  const V=views[route]||HomeView;
+  const navOn = k => route===k || (k==='plus' && ['catalogue','profils'].includes(route));
+  if(backend.needLogin) return html`<div class="shell"><main class="main"><${Login}/></main><${Toast}/></div>`;
+  const body = !S.profiles.length ? html`<${Onboarding}/>` : html`
+    <div class="wrap" style="margin-bottom:-4px"><div class="topbar">
+      <div class="brand mob"><span class="disc"></span>Cabine</div>
+      <span class="chip"><span class="dot" style=${`background:${p?.color}`}></span>
+        ${S.profiles.length>1 ? html`<select aria-label="Profil actif" value=${p?.id} onChange=${e=>setActiveProfile(e.target.value)}>${S.profiles.map(x=>html`<option value=${x.id}>${x.tradeName||x.ownerName}</option>`)}</select>` : html`<span>${p?.tradeName||p?.ownerName}</span>`}</span>
+    </div>${backend.note && html`<div class="notice warn small" style="margin-top:10px">${backend.note}</div>`}</div>
+    <${V}/>`;
+  return html`<div class="shell">
+    ${S.profiles.length>0 && html`<nav class="side"><div class="brand"><span class="disc"></span>Cabine</div>${NAV.map(([k,l,ic])=>html`<a href=${'#'+k} class=${navOn(k)?'on':''}>${ic}${l}</a>`)}<a href="#catalogue" class=${route==='catalogue'?'on':''}>${I.box}Catalogue</a><a href="#profils" class=${route==='profils'?'on':''}>${I.id}Profils</a></nav>`}
+    <main class="main">${body}</main>
+    ${S.profiles.length>0 && html`<nav class="tabs">${NAV.map(([k,l,ic])=>html`<a href=${'#'+k} class=${navOn(k)?'on':''}>${ic}${l}</a>`)}</nav>`}
+    <${Sheets}/><${Toast}/>
+  </div>`;
+}
+if(window.CABINE_CONFIG && 'serviceWorker' in navigator && !/claude\.ai|claudeusercontent/.test(location.hostname)){
+  const l=document.createElement('link'); l.rel='manifest'; l.href='manifest.webmanifest'; document.head.appendChild(l);
+  navigator.serviceWorker.register('sw.js').catch(()=>{});
+}
+initStore().then(()=>render(html`<${App}/>`, document.getElementById('app')));
+</script>

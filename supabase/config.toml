@@ -1,0 +1,7 @@
+project_id = "cabine"
+
+[functions.google]
+verify_jwt = true
+
+[functions.booking]
+verify_jwt = false

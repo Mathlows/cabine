@@ -1,0 +1,6 @@
+# Données personnelles : ne jamais publier
+import-mathlows.json
+*.json.bak
+sauvegarde-*.json
+.DS_Store
+supabase/.temp/

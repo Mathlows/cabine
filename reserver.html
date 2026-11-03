@@ -1,0 +1,177 @@
+<!doctype html>
+<html lang="fr">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
+<title>Prendre rendez-vous</title>
+<meta name="robots" content="noindex">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Bricolage+Grotesque:opsz,wght@12..96,500;12..96,700&family=Instrument+Sans:wght@400;500;600&display=swap">
+<style>
+:root{--bg:#f4f5f8;--surface:#fff;--surface-2:#eceef4;--line:#d9dce6;--ink:#151a2b;--ink-2:#555c72;--accent:#3046c9;--accent-ink:#fff;--accent-soft:#e3e7fb;--bad:#b3261e;--ok:#16794a;
+  --f-display:"Bricolage Grotesque","Avenir Next",system-ui,sans-serif;--f-body:"Instrument Sans",system-ui,-apple-system,"Segoe UI",sans-serif}
+@media (prefers-color-scheme:dark){:root{--bg:#0f1220;--surface:#171b2c;--surface-2:#20253a;--line:#2c3250;--ink:#eceef6;--ink-2:#a9aec4;--accent:#8c9cff;--accent-ink:#0f1220;--accent-soft:#252c52;--bad:#ff8a80;--ok:#5fd39a;color-scheme:dark}}
+*{box-sizing:border-box}
+body{margin:0;background:var(--bg);color:var(--ink);font:15px/1.5 var(--f-body);padding:24px max(16px,env(safe-area-inset-right)) 48px max(16px,env(safe-area-inset-left))}
+main{max-width:640px;margin:0 auto;display:flex;flex-direction:column;gap:20px}
+h1,h2{font-family:var(--f-display);margin:0;text-wrap:balance} h1{font-size:1.7rem} h2{font-size:1.1rem}
+.card{background:var(--surface);border:1px solid var(--line);border-radius:12px;padding:18px;display:flex;flex-direction:column;gap:14px}
+.muted{color:var(--ink-2)} .small{font-size:.88rem}
+.days{display:flex;gap:8px;overflow-x:auto;padding-bottom:4px}
+.day{flex:none;border:1px solid var(--line);background:var(--surface);border-radius:10px;padding:8px 12px;text-align:center;cursor:pointer;font:inherit;color:inherit;min-width:64px}
+.day b{display:block;font-family:var(--f-display);font-size:1.2rem}
+.day.on{background:var(--accent);color:var(--accent-ink);border-color:var(--accent)}
+.slots{display:grid;grid-template-columns:repeat(auto-fill,minmax(90px,1fr));gap:8px}
+.slot{border:1px solid var(--line);background:var(--surface);border-radius:8px;padding:10px 0;font:inherit;font-weight:600;color:inherit;cursor:pointer}
+.slot.on{background:var(--accent);color:var(--accent-ink);border-color:var(--accent)}
+.fields{display:grid;grid-template-columns:repeat(auto-fit,minmax(min(100%,220px),1fr));gap:12px}
+.full{grid-column:1/-1}
+label{display:flex;flex-direction:column;gap:4px;font-size:.84rem;font-weight:600;color:var(--ink-2)}
+input,select,textarea{font:inherit;font-weight:400;color:var(--ink);background:var(--surface);border:1px solid var(--line);border-radius:8px;padding:10px 11px;width:100%}
+textarea{min-height:90px;resize:vertical}
+.seg{display:inline-flex;background:var(--surface-2);border-radius:9px;padding:3px;gap:2px;align-self:flex-start}
+.seg button{border:0;background:none;padding:7px 14px;border-radius:7px;font:inherit;font-weight:600;color:var(--ink-2);cursor:pointer}
+.seg button.on{background:var(--surface);color:var(--ink)}
+.btn{border:0;background:var(--accent);color:var(--accent-ink);border-radius:9px;padding:12px 18px;font:inherit;font-weight:600;cursor:pointer;align-self:flex-start}
+.btn:disabled{opacity:.5}
+.results{border:1px solid var(--line);border-radius:8px;overflow:hidden}
+.results button{display:block;width:100%;text-align:left;border:0;border-bottom:1px solid var(--line);background:var(--surface);padding:9px 12px;font:inherit;color:inherit;cursor:pointer}
+.err{color:var(--bad);font-weight:600}
+:focus-visible{outline:2px solid var(--accent);outline-offset:2px}
+[hidden]{display:none!important}
+</style>
+</head>
+<body>
+<main>
+  <div><h1 id="title">Prendre rendez-vous</h1><p class="muted" id="intro" style="margin:6px 0 0"></p></div>
+  <div id="loading" class="card">Chargement des disponibilités…</div>
+  <div id="closed" class="card" hidden><h2>Prise de rendez-vous indisponible</h2><p class="muted" style="margin:0" id="closedMsg">Ce lien n’est pas actif pour le moment.</p></div>
+
+  <section id="pick" class="card" hidden>
+    <h2>1. Choisissez un créneau</h2>
+    <div class="small muted" id="place"></div>
+    <div class="days" id="days"></div>
+    <div class="slots" id="slots"></div>
+    <div class="small muted" id="noslot" hidden>Aucun créneau libre pour le moment. Revenez un peu plus tard.</div>
+  </section>
+
+  <form id="form" class="card" hidden novalidate>
+    <h2>2. Vos informations</h2>
+    <p class="small muted" style="margin:0">Elles serviront à préparer le rendez-vous et à établir le devis.</p>
+    <div class="seg" id="kind"><button type="button" data-k="particulier" class="on">Particulier</button><button type="button" data-k="entreprise">Entreprise</button></div>
+    <div class="fields">
+      <div class="full" id="coBox" hidden>
+        <label>Rechercher votre entreprise (nom ou SIRET)<input id="coQ" autocomplete="off"></label>
+        <div class="results" id="coRes" hidden></div>
+      </div>
+      <label class="co" hidden>Nom de l’entreprise<input name="company"></label>
+      <label class="co" hidden>SIRET<input name="siret" inputmode="numeric"></label>
+      <label>Prénom<input name="firstName" autocomplete="given-name"></label>
+      <label>Nom<input name="lastName" autocomplete="family-name"></label>
+      <label class="full"><span class="lbl-addr">Adresse</span><input name="address" autocomplete="street-address"></label>
+      <label>Code postal<input name="cp" inputmode="numeric" autocomplete="postal-code"></label>
+      <label>Ville<input name="city" autocomplete="address-level2"></label>
+      <label>E-mail<input name="email" type="email" autocomplete="email" required></label>
+      <label>Téléphone<input name="phone" type="tel" autocomplete="tel"></label>
+    </div>
+    <h2>3. Votre événement</h2>
+    <div class="fields">
+      <label>Type d’événement<select name="eventType"><option value="">—</option><option>Mariage</option><option>Anniversaire</option><option>Soirée d’entreprise</option><option>Bar / Club</option><option>Festival</option><option>Soirée privée</option><option>Autre</option></select></label>
+      <label>Date prévue<input name="eventDate" type="date"></label>
+      <label class="full">Lieu de l’événement<input name="eventLocation"></label>
+      <label>Nombre d’invités<input name="guests" inputmode="numeric"></label>
+      <label>Styles musicaux souhaités<input name="music"></label>
+      <label class="full">Message, questions, attentes particulières<textarea name="message"></textarea></label>
+    </div>
+    <div class="small muted" id="chosen"></div>
+    <div class="err" id="ferr" hidden></div>
+    <button class="btn" id="send" type="submit">Envoyer ma demande</button>
+  </form>
+
+  <div id="done" class="card" hidden><h2>Demande envoyée</h2><p style="margin:0" id="doneMsg">Merci ! Vous allez recevoir un e-mail de confirmation dès que le créneau sera validé.</p></div>
+</main>
+<script src="config.js"></script>
+<script>
+const CFG = window.CABINE_CONFIG || {};
+const q = new URLSearchParams(location.search);
+const U = q.get('u') || CFG.ownerId || '', T = q.get('t') || '';
+const $ = id => document.getElementById(id);
+let chosen = null, kind = 'particulier', proposalMode = false;
+
+async function call(body){
+  const r = await fetch(CFG.supabaseUrl + '/functions/v1/booking', {method:'POST', headers:{'Content-Type':'application/json', apikey:CFG.supabaseAnonKey, Authorization:'Bearer '+CFG.supabaseAnonKey}, body:JSON.stringify(body)});
+  const j = await r.json().catch(()=>({error:'reseau'}));
+  if(!r.ok) throw new Error(j.error||'erreur'); return j;
+}
+const dayKey = iso => new Date(iso).toLocaleDateString('fr-CA',{timeZone:'Europe/Paris'});
+const hm = iso => new Date(iso).toLocaleTimeString('fr-FR',{timeZone:'Europe/Paris',hour:'2-digit',minute:'2-digit'});
+const longDate = iso => new Date(iso).toLocaleString('fr-FR',{timeZone:'Europe/Paris',weekday:'long',day:'numeric',month:'long',hour:'2-digit',minute:'2-digit'});
+
+function renderSlots(slots){
+  const byDay = {}; slots.forEach(s => (byDay[dayKey(s.start)] = byDay[dayKey(s.start)] || []).push(s));
+  const keys = Object.keys(byDay).sort();
+  $('noslot').hidden = keys.length>0;
+  let cur = keys[0];
+  const draw = () => {
+    $('days').replaceChildren(...keys.map(k => { const d = new Date(k+'T12:00:00'); const b=document.createElement('button'); b.type='button'; b.className='day'+(k===cur?' on':'');
+      b.innerHTML = `<span class="small">${d.toLocaleDateString('fr-FR',{weekday:'short'})}</span><b>${d.getDate()}</b><span class="small">${d.toLocaleDateString('fr-FR',{month:'short'})}</span>`;
+      b.onclick = () => { cur=k; draw(); }; return b; }));
+    $('slots').replaceChildren(...(byDay[cur]||[]).map(s => { const b=document.createElement('button'); b.type='button'; b.className='slot'+(chosen&&chosen.start===s.start?' on':''); b.textContent=hm(s.start);
+      b.onclick = () => { chosen=s; draw(); $('form').hidden=false; $('chosen').textContent='Créneau choisi : '+longDate(s.start); if(proposalMode) $('send').textContent='Confirmer ce créneau'; $('form').scrollIntoView({behavior:'smooth'}); }; return b; }));
+  };
+  draw();
+}
+
+async function start(){
+  if(!CFG.supabaseUrl || (!U && !T)){ $('loading').hidden=true; $('closed').hidden=false; return; }
+  try{
+    const info = await call(T ? {action:'info', t:T} : {action:'info', u:U});
+    $('loading').hidden=true;
+    $('title').textContent = info.title; $('intro').textContent = info.intro || ''; document.title = info.title;
+    $('place').textContent = info.place ? 'Lieu du rendez-vous : '+info.place : '';
+    $('pick').hidden=false;
+    if(T){ proposalMode=true; document.querySelector('#pick h2').textContent='Choisissez l’un des créneaux proposés';
+      // en mode proposition, les infos ont déjà été données : le formulaire se réduit au bouton
+      document.querySelectorAll('#form h2, #form .fields, #form .seg, #form > p').forEach(e=>e.hidden=true);
+      renderSlots(info.proposals||[]);
+    } else renderSlots(info.slots||[]);
+  }catch(e){ $('loading').hidden=true; $('closed').hidden=false; if(e.message==='lien_expire') $('closedMsg').textContent='Ce lien a expiré ou a déjà été utilisé.'; }
+}
+
+document.querySelectorAll('#kind button').forEach(b => b.onclick = () => {
+  kind = b.dataset.k; document.querySelectorAll('#kind button').forEach(x=>x.classList.toggle('on', x===b));
+  const ent = kind==='entreprise'; $('coBox').hidden=!ent; document.querySelectorAll('.co').forEach(x=>x.hidden=!ent);
+  document.querySelector('.lbl-addr').textContent = ent ? 'Adresse du siège' : 'Adresse';
+});
+let coTimer;
+$('coQ').addEventListener('input', e => { clearTimeout(coTimer); const v=e.target.value.trim(); if(v.length<3){ $('coRes').hidden=true; return; }
+  coTimer = setTimeout(async()=>{ try{ const r = await fetch('https://recherche-entreprises.api.gouv.fr/search?per_page=6&q='+encodeURIComponent(v)); const j=await r.json();
+    const f = document.forms[0];
+    $('coRes').replaceChildren(...(j.results||[]).map(x=>{ const s=x.siege||{}; const b=document.createElement('button'); b.type='button';
+      b.innerHTML = `<b></b><br><span class="small muted"></span>`; b.querySelector('b').textContent=x.nom_complet; b.querySelector('span').textContent=[x.siren, s.code_postal, s.libelle_commune].filter(Boolean).join(' · ');
+      b.onclick=()=>{ f.company.value=x.nom_complet; f.siret.value=s.siret||''; f.address.value=[s.numero_voie,s.indice_repetition,s.type_voie,s.libelle_voie].filter(Boolean).join(' ')||s.adresse||''; f.cp.value=s.code_postal||''; f.city.value=s.libelle_commune||''; $('coRes').hidden=true; $('coQ').value=''; };
+      return b; })); $('coRes').hidden = !(j.results||[]).length; }catch(_){} }, 350); });
+
+$('form').addEventListener('submit', async e => {
+  e.preventDefault(); $('ferr').hidden=true;
+  if(!chosen){ $('ferr').textContent='Choisissez d’abord un créneau.'; $('ferr').hidden=false; return; }
+  const f = Object.fromEntries(new FormData(e.target).entries()); f.kind = kind;
+  if(!proposalMode){
+    if(!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(f.email||'')){ $('ferr').textContent='Indiquez une adresse e-mail valide.'; $('ferr').hidden=false; return; }
+    if(!(f.lastName || f.company)){ $('ferr').textContent='Indiquez votre nom ou celui de votre entreprise.'; $('ferr').hidden=false; return; }
+  }
+  $('send').disabled=true;
+  try{
+    await call(proposalMode ? {action:'pick', t:T, slot:chosen} : {action:'request', u:U, slot:chosen, form:f});
+    $('form').hidden=true; $('pick').hidden=true; $('done').hidden=false;
+    if(proposalMode) $('doneMsg').textContent='Merci ! Le créneau du '+longDate(chosen.start)+' a été transmis. Vous recevrez une confirmation par e-mail.';
+  }catch(err){
+    $('send').disabled=false;
+    $('ferr').textContent = err.message==='creneau_indisponible' ? 'Ce créneau vient d’être pris. Choisissez-en un autre.' : err.message==='trop_de_demandes' ? 'Vous avez déjà plusieurs demandes en attente.' : 'L’envoi n’a pas fonctionné. Réessayez dans un instant.';
+    $('ferr').hidden=false; if(err.message==='creneau_indisponible') start();
+  }
+});
+start();
+</script>
+</body>
+</html>
