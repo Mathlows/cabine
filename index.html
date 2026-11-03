@@ -1043,6 +1043,8 @@ function HomeView(){
   const inv = mine.filter(d=>d.type==='facture');
   const tot = d=>computeTotals(d,docProfile(d)).ttc;
   const paidYear = inv.filter(d=>d.status==='payee' && (d.paidAt||d.issueDate||'').startsWith(y)).reduce((a,d)=>a+computeTotals(d,docProfile(d)).ht,0);
+  const billedYearDocs = inv.filter(d=>d.number && d.status!=='annulee' && (d.issueDate||'').startsWith(y));
+  const billedYear = billedYearDocs.reduce((a,d)=>a+computeTotals(d,docProfile(d)).ht,0);
   const toCollect = inv.filter(d=>d.number && d.status==='finalisee').reduce((a,d)=>a+computeTotals(d,docProfile(d)).due,0);
   const late = inv.filter(d=>docState(d).k==='late');
   const drafts = inv.filter(d=>d.status==='brouillon').sort((a,b)=>(a.eventDate||'').localeCompare(b.eventDate||''));
@@ -1054,6 +1056,7 @@ function HomeView(){
     <${ImportCard}/>
     ${pastDrafts.length>0 && html`<div class="notice warn">${pastDrafts.length} prestation${pastDrafts.length>1?'s sont passées':' est passée'} sans facture finalisée. <button class="btn ghost sm" onClick=${()=>open('doc',{doc:pastDrafts[0]})}>Voir</button></div>`}
     <div class="stats">
+      <div class="card stat"><div class="lab">Facturé en ${y}</div><div class="val">${eur(billedYear)}</div><div class="sub">${billedYearDocs.length} facture${billedYearDocs.length>1?'s':''} numérotée${billedYearDocs.length>1?'s':''}${vatOn(p)?', hors taxes':''}</div></div>
       <div class="card stat"><div class="lab">Encaissé en ${y}</div><div class="val">${eur(paidYear)}</div>${ceiling? html`<div class="meter"><i style=${`width:${Math.min(100,paidYear/ceiling*100)}%`}></i></div><div class="sub">${Math.round(paidYear/ceiling*100)} % du plafond micro (${eur(ceiling)})</div>`: html`<div class="sub">Montant hors taxes</div>`}</div>
       <div class="card stat"><div class="lab">À encaisser</div><div class="val">${eur(toCollect)}</div><div class="sub">${late.length? late.length+' facture'+(late.length>1?'s':'')+' en retard':'Aucun retard'}</div></div>
       <div class="card stat"><div class="lab">Brouillons</div><div class="val">${drafts.length}</div><div class="sub">${eur(drafts.reduce((a,d)=>a+tot(d),0))} prévus</div></div>
