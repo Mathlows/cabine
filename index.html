@@ -619,7 +619,7 @@ function Sheets(){
   const [stack,setStack]=useState([]);
   useEffect(()=>{ pushSheet = s => setStack(x=>[...x,s]); },[]);
   const close = key => setStack(x=>x.filter(s=>s.key!==key));
-  const C = {send:SendSheet, booking:BookingView, bookingSettings:BookingSettings, client:ClientForm, product:ProductForm, profile:ProfileForm, doc:DocEditor, event:EventForm, confirm:Confirm, clientView:ClientView, picker:ProductPicker};
+  const C = {yearDetail:YearDetail, send:SendSheet, booking:BookingView, bookingSettings:BookingSettings, client:ClientForm, product:ProductForm, profile:ProfileForm, doc:DocEditor, event:EventForm, confirm:Confirm, clientView:ClientView, picker:ProductPicker};
   return stack.map(s=>{ const Comp=C[s.kind]; return html`<${Comp} key=${s.key} ...${s.props} onClose=${()=>close(s.key)} />`; });
 }
 
@@ -1036,6 +1036,23 @@ function AgendaView(){
   </div>`;
 }
 
+
+function YearDetail({year, onClose}){
+  useStore(); const p=activeProfile();
+  const all = S.docs.filter(d=>d.type==='facture' && d.number && (!p || d.profileId===p.id) && (d.issueDate||'').startsWith(year)).sort((a,b)=>a.number.localeCompare(b.number));
+  const counted = all.filter(d=>d.status!=='annulee'), cancelled = all.filter(d=>d.status==='annulee');
+  const ht = d=>computeTotals(d,docProfile(d)).ht;
+  const byMonth = MONTHS.map((m,i)=>{ const k=year+'-'+String(i+1).padStart(2,'0'); const ds=counted.filter(d=>d.issueDate.startsWith(k)); return [m, ds.length, ds.reduce((a,d)=>a+ht(d),0)]; }).filter(x=>x[1]);
+  const drafts = S.docs.filter(d=>d.type==='facture' && !d.number && (!p || d.profileId===p.id));
+  return html`<${Sheet} title=${'Facturé en '+year} onClose=${onClose}>
+    <div class="card totals" style="align-items:stretch"><div class="big"><span>${counted.length} factures</span><span>${eur(counted.reduce((a,d)=>a+ht(d),0))}</span></div></div>
+    <div class="sect"><div class="lab">Par mois (date de la facture)</div>
+      <div class="list">${byMonth.map(([m,n,v])=>html`<div class="item"><div class="grow" style="text-transform:capitalize">${m}</div><span class="tiny">${n} fact.</span><span class="amt" style="min-width:96px;text-align:right">${eur(v)}</span></div>`)}</div></div>
+    <div class="sect"><div class="lab">Factures comptées</div><${DocList} docs=${counted}/></div>
+    <div class="sect"><div class="lab">Annulées, non comptées (${cancelled.length})</div>${cancelled.length? html`<${DocList} docs=${cancelled}/>` : html`<div class="muted small">Aucune.</div>`}</div>
+    <div class="tiny">Les ${drafts.length} facture${drafts.length>1?'s':''} provisoire${drafts.length>1?'s':''} (brouillons sans numéro) ne sont jamais comptées.</div>
+  <//>`;
+}
 /* ---------------- accueil ---------------- */
 function HomeView(){
   useStore(); const p=activeProfile(); const y=todayISO().slice(0,4);
@@ -1056,7 +1073,7 @@ function HomeView(){
     <${ImportCard}/>
     ${pastDrafts.length>0 && html`<div class="notice warn">${pastDrafts.length} prestation${pastDrafts.length>1?'s sont passées':' est passée'} sans facture finalisée. <button class="btn ghost sm" onClick=${()=>open('doc',{doc:pastDrafts[0]})}>Voir</button></div>`}
     <div class="stats">
-      <div class="card stat"><div class="lab">Facturé en ${y}</div><div class="val">${eur(billedYear)}</div><div class="sub">${billedYearDocs.length} facture${billedYearDocs.length>1?'s':''} numérotée${billedYearDocs.length>1?'s':''}${vatOn(p)?', hors taxes':''}</div></div>
+      <button class="card stat" style="text-align:left;font:inherit;color:inherit;cursor:pointer" onClick=${()=>open('yearDetail',{year:y})}><div class="lab">Facturé en ${y}</div><div class="val">${eur(billedYear)}</div><div class="sub">${billedYearDocs.length} facture${billedYearDocs.length>1?'s':''} numérotée${billedYearDocs.length>1?'s':''}${vatOn(p)?', hors taxes':''} · voir le détail</div></button>
       <div class="card stat"><div class="lab">Encaissé en ${y}</div><div class="val">${eur(paidYear)}</div>${ceiling? html`<div class="meter"><i style=${`width:${Math.min(100,paidYear/ceiling*100)}%`}></i></div><div class="sub">${Math.round(paidYear/ceiling*100)} % du plafond micro (${eur(ceiling)})</div>`: html`<div class="sub">Montant hors taxes</div>`}</div>
       <div class="card stat"><div class="lab">À encaisser</div><div class="val">${eur(toCollect)}</div><div class="sub">${late.length? late.length+' facture'+(late.length>1?'s':'')+' en retard':'Aucun retard'}</div></div>
       <div class="card stat"><div class="lab">Brouillons</div><div class="val">${drafts.length}</div><div class="sub">${eur(drafts.reduce((a,d)=>a+tot(d),0))} prévus</div></div>
