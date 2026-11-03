@@ -1065,6 +1065,14 @@ function HomeView(){
 }
 
 /* ---------------- réglages ---------------- */
+function importAll(e){
+  const file=e.target.files[0]; if(!file) return; const rd=new FileReader();
+  rd.onload=async()=>{ try{ const j=JSON.parse(rd.result); const items=[]; for(const c of COLS) for(const o of (j[c]||[])) if(!S[c].some(x=>x.id===o.id)) items.push([c,o]);
+    items.sort((a,b)=>(a[0]==='profiles')-(b[0]==='profiles')); toast('Import de '+items.length+' éléments…');
+    for(const [c,o] of items){ let ok=false; for(let t=0;t<4&&!ok;t++){ try{ await backend.put(c,o); ok=true; }catch(err){ await new Promise(r=>setTimeout(r,800*(t+1))); } } if(ok && !S[c].some(x=>x.id===o.id)) S[c]=[...S[c],o]; }
+    const p=S.profiles[0]; if(p && !activeProfile()) setActiveProfile(p.id); emit(); toast(items.length+' éléments importés'); }catch(err){ toast('Ce fichier n’est pas une sauvegarde valide.'); } };
+  rd.readAsText(file);
+}
 function SettingsView(){
   useStore();
   const hasDemo = COLS.some(c=>S[c].some(x=>x.demo));
@@ -1074,11 +1082,6 @@ function SettingsView(){
     const name = `sauvegarde-facturation-${todayISO()}.json`;
     if(dl){ try{ await dl.save({filename:name, data}); toast('Sauvegarde enregistrée'); }catch(e){ if(e.code!=='declined') toast('Impossible ('+e.code+')'); } return; }
     const a=document.createElement('a'); a.href=URL.createObjectURL(new Blob([data],{type:'application/json'})); a.download=name; a.click();
-  }
-  function importAll(e){
-    const file=e.target.files[0]; if(!file) return; const rd=new FileReader();
-    rd.onload=async()=>{ try{ const j=JSON.parse(rd.result); let n=0; for(const c of COLS){ for(const o of (j[c]||[])){ if(!S[c].some(x=>x.id===o.id)){ await put(c,o); n++; } } } toast(n+' éléments importés'); }catch(err){ toast('Ce fichier n’est pas une sauvegarde valide.'); } };
-    rd.readAsText(file);
   }
   return html`<div class="wrap">
     <h1>Plus</h1>
@@ -1328,7 +1331,7 @@ function Onboarding(){
     <div class="card stack">
       <div style="font-weight:600">Pour commencer, créez votre profil</div>
       <div class="small muted">Nom, statut (micro-entreprise, SASU…), SIRET et coordonnées. Ces informations apparaissent sur vos factures. Vous pourrez ajouter d’autres profils ensuite.</div>
-      <div class="row"><button class="btn pri" onClick=${()=>open('profile')}>Créer mon profil</button><button class="btn" onClick=${loadDemo}>Essayer avec des exemples</button></div>
+      <div class="row"><button class="btn pri" onClick=${()=>open('profile')}>Créer mon profil</button><label class="btn">Importer une sauvegarde<input type="file" accept=".json,application/json" hidden onChange=${importAll}/></label><button class="btn ghost" onClick=${loadDemo}>Essayer avec des exemples</button></div>
     </div>
     <${ImportCard}/>
     ${backend.note && html`<div class="notice warn small">${backend.note}</div>`}
