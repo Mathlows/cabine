@@ -49,11 +49,11 @@ jobs:
         run: supabase db push --remote -p "$DB_PASSWORD" --yes
       - name: Clés Google pour les fonctions
         if: env.GOOGLE_CLIENT_ID != ''
-        run: supabase secrets set --project-ref "$PROJECT_REF" GOOGLE_CLIENT_ID="$GOOGLE_CLIENT_ID" GOOGLE_CLIENT_SECRET="$GOOGLE_CLIENT_SECRET"
+        run: supabase secrets set --project-ref "$PROJECT_REF" --yes GOOGLE_CLIENT_ID="$GOOGLE_CLIENT_ID" GOOGLE_CLIENT_SECRET="$GOOGLE_CLIENT_SECRET"
       - name: Déployer les fonctions
         run: |
-          supabase functions deploy google --project-ref "$PROJECT_REF"
-          supabase functions deploy booking --project-ref "$PROJECT_REF" --no-verify-jwt
+          supabase functions deploy google --project-ref "$PROJECT_REF" --yes
+          supabase functions deploy booking --project-ref "$PROJECT_REF" --no-verify-jwt --yes
       - name: Connexion avec Google (réglages d'authentification)
         if: env.GOOGLE_CLIENT_ID != ''
         run: |
