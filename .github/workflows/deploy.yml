@@ -4,6 +4,11 @@ on:
   push:
     branches: [main]
   workflow_dispatch:
+    inputs:
+      notif_test:
+        description: "Envoyer une notification de test à tous les appareils enregistrés"
+        type: boolean
+        default: false
 
 permissions:
   contents: read
@@ -136,6 +141,13 @@ jobs:
           Q='{"query":"select count(*) as appareils, count(distinct split_part(endpoint, '"'"'/'"'"', 3)) as services, (select count(*) from public.reminders_sent) as rappels_envoyes from public.push_subscriptions"}'
           D=$(curl -sS -m 30 "https://api.supabase.com/v1/projects/$PROJECT_REF/database/query" -H "Authorization: Bearer $SUPABASE_ACCESS_TOKEN" -H "Content-Type: application/json" -d "$Q" || true)
           echo "Appareils enregistrés pour les notifications : $D"
+      - name: Notification de test (à la demande)
+        if: ${{ github.event_name == 'workflow_dispatch' && inputs.notif_test }}
+        run: |
+          SR=$(curl -sS "https://api.supabase.com/v1/projects/$PROJECT_REF/api-keys?reveal=true" -H "Authorization: Bearer $SUPABASE_ACCESS_TOKEN" | jq -r '[.[] | select(.name=="service_role")][0].api_key // empty')
+          echo "::add-mask::$SR"
+          R=$(curl -sS -m 60 -X POST "https://$PROJECT_REF.supabase.co/functions/v1/reminders" -H "Content-Type: application/json" -H "Authorization: Bearer $SR" -d '{"test":true}')
+          echo "Résultat du test : $R"
       - name: Connexion avec Google (réglages d'authentification)
         if: env.GOOGLE_CLIENT_ID != ''
         run: |

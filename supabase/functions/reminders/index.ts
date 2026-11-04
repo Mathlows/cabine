@@ -9,6 +9,20 @@ const clientName = (c: any) => !c ? "" : c.kind === "entreprise" ? (c.company ||
 Deno.serve(async (req) => {
   if (req.method === "OPTIONS") return new Response("ok", { headers: cors });
   try {
+    // test déclenché par la mise en ligne (clé de service uniquement)
+    const body = await req.json().catch(() => ({}));
+    if (body.test) {
+      const auth = (req.headers.get("Authorization") || "").replace("Bearer ", "");
+      if (!auth || auth !== Deno.env.get("SUPABASE_SERVICE_ROLE_KEY")) return json({ error: "non_autorise" }, 403);
+      const { data: all } = await admin.from("push_subscriptions").select("user_id");
+      const out: any[] = [];
+      for (const u of [...new Set((all || []).map((s) => s.user_id))]) {
+        const report = { subs: 0, sent: 0, errors: [] as string[] };
+        await pushToUser(u, { title: "Cabine", body: "Notification de test envoyée par le serveur.", url: "#agenda", tag: "test-serveur" }, report);
+        out.push(report);
+      }
+      return json({ ok: true, test: out });
+    }
     const { data: subs } = await admin.from("push_subscriptions").select("user_id");
     const users = [...new Set((subs || []).map((s) => s.user_id))];
     const now = Date.now(); let sent = 0;
