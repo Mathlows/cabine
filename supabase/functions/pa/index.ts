@@ -46,10 +46,12 @@ Deno.serve(async (req) => {
       }
       case "send": {
         // Dépôt du Factur-X (PDF/A-3 avec XML CII intégré)
+        // Factur-X (application/pdf) ou XML CII seul (application/xml), selon ce qu'accepte le destinataire
         const bytes = b64ToBytes(String(body.base64 || ""));
-        if (bytes.length < 1000) return json({ error: "fichier_invalide" }, 400);
+        const type = body.contentType === "application/xml" ? "application/xml" : "application/pdf";
+        if (bytes.length < (type === "application/pdf" ? 1000 : 200)) return json({ error: "fichier_invalide" }, 400);
         const q = new URLSearchParams({ external_id: String(body.externalId || "") });
-        const r = await call("POST", "/invoices?" + q, bytes, "application/pdf");
+        const r = await call("POST", "/invoices?" + q, bytes, type);
         return json({ ok: true, id: r?.id ?? null, events: r?.events ?? [] });
       }
       case "events": {

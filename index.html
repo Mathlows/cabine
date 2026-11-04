@@ -804,11 +804,24 @@ async function sendToPA(d, silent){
     // bac à sable : la plateforme n'accepte que l'entreprise fictive du compte de test
     // bac à sable : vendeur = entreprise fictive du compte, client = entreprise fictive de test (000000001)
     const opts = env.sandbox && env.siren ? {sellerSiren:env.siren, buyerSiren: env.siren==='000000001' ? '000000002' : '000000001'} : {};
-    const by = await facturxBytes(cur, opts); let bin=''; for(let i=0;i<by.length;i+=0x8000) bin+=String.fromCharCode.apply(null, by.subarray(i,i+0x8000));
-    const r = await pacall('send', {base64:btoa(bin), externalId:env.sandbox ? cur.number+'-TEST-'+Date.now().toString(36) : cur.number});
+    const b64 = by => { let bin=''; for(let i=0;i<by.length;i+=0x8000) bin+=String.fromCharCode.apply(null, by.subarray(i,i+0x8000)); return btoa(bin); };
+    const ext = env.sandbox ? cur.number+'-TEST-'+Date.now().toString(36) : cur.number;
+    const client = clientById(cur.clientId);
+    const sendXml = () => pacall('send', {base64:b64(new TextEncoder().encode(ciiXml(cur, opts))), contentType:'application/xml', externalId:ext});
+    let r, format='facturx';
+    if(client?.paFormat==='cii'){ r = await sendXml(); format='cii'; }
+    else {
+      try{ r = await pacall('send', {base64:b64(await facturxBytes(cur, opts)), externalId:ext}); }
+      catch(e){
+        // le destinataire n'accepte pas le Factur-X : même facture en XML CII seul
+        if(!/does not accept this document/i.test(e.message)) throw e;
+        r = await sendXml(); format='cii';
+        if(client && !env.sandbox) await put('clients', {...client, paFormat:'cii'});
+      }
+    }
     const last = (r.events||[]).slice(-1)[0];
     const now = S.docs.find(x=>x.id===cur.id)||cur; const {paError, paErrorAt, ...clean} = now;
-    await put('docs', {...clean, pa:{id:r.id, sandbox:env.sandbox, sentAt:new Date().toISOString(), status:last?.status_code||'fr:200', events:r.events||[]}});
+    await put('docs', {...clean, pa:{id:r.id, sandbox:env.sandbox, format, sentAt:new Date().toISOString(), status:last?.status_code||'fr:200', events:r.events||[]}});
     toast(env.sandbox ? `${cur.number} transmise à l’environnement de test` : `${cur.number} transmise à la plateforme agréée`);
   }catch(e){
     await put('docs', {...(S.docs.find(x=>x.id===cur.id)||cur), paError:e.message, paErrorAt:new Date().toISOString()});
@@ -1154,7 +1167,7 @@ function DocEditor({doc, isNew, onClose}){
     ${locked && html`<div class="notice">Cette facture est numérotée : son contenu est figé. Vous pouvez la télécharger, l’envoyer et suivre son paiement.</div>`}
     ${isInv && d.number && !facturxApplies(d) && html`<div class="tiny">Client particulier : facture PDF classique. Les ventes aux particuliers seront déclarées via la plateforme agréée (e-reporting) à partir de septembre 2027.</div>`}
     ${isInv && d.number && facturxApplies(d) && (()=>{ const iss=facturxIssues(d); return iss.length ? html`<div class="notice warn small"><b>Facture électronique :</b> ${iss.join(' ')}</div>` : html`<div class="small" style="color:var(--ok)">✓ Facture électronique (Factur-X) prête : le PDF téléchargé ou envoyé contient les données de la facture.</div>`; })()}
-    ${live?.pa?.id && html`<div class="card row sb"><div><div style="font-weight:600">Plateforme agréée${live.pa.sandbox?' (test)':''}</div><div class="tiny">Transmise le ${new Date(live.pa.sentAt).toLocaleDateString('fr-FR')}${live.pa.updatedAt?' · mise à jour le '+new Date(live.pa.updatedAt).toLocaleDateString('fr-FR'):''}</div></div><span class=${'pill '+paTone(live.pa.status)}>${paLabel(live.pa.status)}</span></div>`}
+    ${live?.pa?.id && html`<div class="card row sb"><div><div style="font-weight:600">Plateforme agréée${live.pa.sandbox?' (test)':''}</div><div class="tiny">Transmise le ${new Date(live.pa.sentAt).toLocaleDateString('fr-FR')}${live.pa.format==='cii'?' (format XML CII)':' (Factur-X)'}${live.pa.updatedAt?' · mise à jour le '+new Date(live.pa.updatedAt).toLocaleDateString('fr-FR'):''}</div></div><span class=${'pill '+paTone(live.pa.status)}>${paLabel(live.pa.status)}</span></div>`}
     ${live?.paError && !live?.pa?.id && html`<div class="notice warn small">Dernier essai d’envoi à la plateforme refusé : ${live.paError}</div>`}
     ${d.imported && html`<div class="notice small">Facture importée de votre historique.${d.paidAssumed?' Le statut « payée » a été déduit de la date d’échéance. Corrigez-le si besoin.':''}</div>`}
     <fieldset disabled=${locked} style="border:0;padding:0;margin:0;display:flex;flex-direction:column;gap:16px;min-width:0">
