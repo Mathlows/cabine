@@ -1377,7 +1377,10 @@ const cleanTitle = t => String(t||'').replace(/^rdv\s*[·:-]?\s*/i,'').trim();
 /* Lieu proposé pour un événement Google rattaché au client c */
 function placeFor(c, title, googleLocation){
   if(googleLocation) return googleLocation;
-  if(c && !matchedByName(c, title)) return cleanTitle(title);   // mot-clé = nom du lieu (« Vogue »)
+  if(c && !matchedByName(c, title)){                              // mot-clé = nom du lieu (« Vogue »)
+    const last=lastLocationFor(c.id), kw=norm(cleanTitle(title));
+    return last && kw && norm(last).includes(kw) ? last : cleanTitle(title);   // « cartel » → « Le Cartel » déjà connu
+  }
   return c ? lastLocationFor(c.id) : cleanTitle(title);
 }
 function lastLocationFor(clientId){
