@@ -8,10 +8,15 @@ let cached = { token: "", until: 0 };
 
 async function token() {
   if (cached.token && Date.now() < cached.until) return cached.token;
-  const id = Deno.env.get("SUPERPDP_CLIENT_ID"), secret = Deno.env.get("SUPERPDP_CLIENT_SECRET");
+  const id = (Deno.env.get("SUPERPDP_CLIENT_ID") || "").trim(), secret = (Deno.env.get("SUPERPDP_CLIENT_SECRET") || "").trim();
   if (!id || !secret) throw new Error("pa_non_configuree");
-  const r = await fetch(AUTH, { method: "POST", headers: { "Content-Type": "application/x-www-form-urlencoded" },
+  // identifiants dans le formulaire, puis en en-tête si la plateforme le préfère
+  let r = await fetch(AUTH, { method: "POST", headers: { "Content-Type": "application/x-www-form-urlencoded" },
     body: new URLSearchParams({ grant_type: "client_credentials", client_id: id, client_secret: secret }).toString() });
+  if (r.status === 401 || r.status === 400) {
+    r = await fetch(AUTH, { method: "POST", headers: { "Content-Type": "application/x-www-form-urlencoded", Authorization: "Basic " + btoa(id + ":" + secret) },
+      body: new URLSearchParams({ grant_type: "client_credentials" }).toString() });
+  }
   const j = await r.json().catch(() => ({}));
   if (!r.ok || !j.access_token) throw new Error(`pa_auth_${r.status}: ${j.error_description || j.error || "refus"}`);
   cached = { token: j.access_token, until: Date.now() + ((j.expires_in ?? 600) - 60) * 1000 };

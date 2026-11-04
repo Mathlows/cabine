@@ -59,16 +59,26 @@ jobs:
       - name: Tester la connexion à la plateforme (sans afficher de données)
         if: env.SUPERPDP_CLIENT_ID != ''
         run: |
-          CODE=$(curl -sS -o /tmp/tok.json -w "%{http_code}" -X POST https://api.superpdp.tech/oauth2/token -H "Content-Type: application/x-www-form-urlencoded" --data-urlencode grant_type=client_credentials --data-urlencode "client_id=$SUPERPDP_CLIENT_ID" --data-urlencode "client_secret=$SUPERPDP_CLIENT_SECRET")
-          echo "Connexion SuperPDP : HTTP $CODE"
-          if [ "$CODE" = "200" ]; then
-            TOK=$(jq -r .access_token /tmp/tok.json); echo "::add-mask::$TOK"
-            ME=$(curl -sS -o /dev/null -w "%{http_code}" "${SUPERPDP_API_URL:-https://api.superpdp.tech/v1.beta}/companies/me" -H "Authorization: Bearer $TOK")
-            echo "Accès au compte entreprise : HTTP $ME"
-          else
-            echo "::warning::Identifiants SuperPDP refusés (HTTP $CODE)"
-          fi
-          rm -f /tmp/tok.json
+          trim() { printf '%s' "$1" | tr -d '\r\n' | sed -e 's/^[[:space:]]*//' -e 's/[[:space:]]*$//'; }
+          CID="$(trim "$SUPERPDP_CLIENT_ID")"; CSE="$(trim "$SUPERPDP_CLIENT_SECRET")"
+          echo "::add-mask::$CID"; echo "::add-mask::$CSE"
+          [ "$CID" != "$SUPERPDP_CLIENT_ID" ] && echo "Note : l'identifiant contenait des espaces ou retours à la ligne"
+          [ "$CSE" != "$SUPERPDP_CLIENT_SECRET" ] && echo "Note : le secret contenait des espaces ou retours à la ligne"
+          echo "Longueurs : identifiant ${#CID} caractères, secret ${#CSE} caractères"
+          URL=https://api.superpdp.tech/oauth2/token
+          A=$(curl -sS -o /tmp/a.json -w "%{http_code}" -X POST $URL -H "Content-Type: application/x-www-form-urlencoded" --data-urlencode grant_type=client_credentials --data-urlencode "client_id=$CID" --data-urlencode "client_secret=$CSE")
+          echo "Méthode 1 (identifiants dans le formulaire) : HTTP $A — motif : $(jq -r '.error // empty' /tmp/a.json 2>/dev/null) $(jq -r '.error_description // empty' /tmp/a.json 2>/dev/null | cut -c1-120)"
+          B=$(curl -sS -o /tmp/b.json -w "%{http_code}" -X POST $URL -u "$CID:$CSE" -H "Content-Type: application/x-www-form-urlencoded" --data-urlencode grant_type=client_credentials)
+          echo "Méthode 2 (identifiants en en-tête) : HTTP $B — motif : $(jq -r '.error // empty' /tmp/b.json 2>/dev/null) $(jq -r '.error_description // empty' /tmp/b.json 2>/dev/null | cut -c1-120)"
+          for F in /tmp/a.json /tmp/b.json; do
+            if jq -e .access_token $F >/dev/null 2>&1; then
+              TOK=$(jq -r .access_token $F); echo "::add-mask::$TOK"
+              ME=$(curl -sS -o /tmp/me.json -w "%{http_code}" "${SUPERPDP_API_URL:-https://api.superpdp.tech/v1.beta}/companies/me" -H "Authorization: Bearer $TOK")
+              echo "Accès au compte entreprise ($F) : HTTP $ME — $(jq -r '.error.message // .message // .error // empty' /tmp/me.json 2>/dev/null | cut -c1-160)"
+              break
+            fi
+          done
+          rm -f /tmp/a.json /tmp/b.json /tmp/me.json
       - name: Déployer les fonctions
         run: |
           supabase functions deploy google --project-ref "$PROJECT_REF" --yes
