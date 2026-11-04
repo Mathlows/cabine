@@ -131,7 +131,7 @@ label.f textarea{min-height:76px;resize:vertical}
   .cal.slide-next{animation:calNext .22s ease-out}.cal.slide-prev{animation:calPrev .22s ease-out}
   @keyframes calNext{from{transform:translateX(28px);opacity:.3}to{transform:none;opacity:1}}
   @keyframes calPrev{from{transform:translateX(-28px);opacity:.3}to{transform:none;opacity:1}}
-  @media (max-width:999px){.ed-grid[data-tab="preview"] .ed-prev{animation:calPrev .2s ease-out}.ed-grid[data-tab="edit"] .ed-form{animation:calNext .2s ease-out}}
+  @media (max-width:999px){.ed-grid[data-tab="preview"] .ed-prev{animation:calNext .2s ease-out}.ed-grid[data-tab="edit"] .ed-form{animation:calPrev .2s ease-out}}
 }
 .cal .more{font-size:.65rem;color:var(--ink-2);padding-left:4px}
 @media (min-width:700px){.cal .cell{min-height:100px;padding:4px}}
@@ -1062,25 +1062,32 @@ function Confirm({title, text, yes='Confirmer', danger, onYes, onClose}){
 }
 
 /* ---------------- glisser à gauche / à droite (téléphone) ---------------- */
-function useSwipe(ref, handlers){
+/* Renvoie une « ref » à poser sur l'élément : le geste se raccroche à chaque fois que l'élément change. */
+function useSwipe(handlers){
   const h=useRef(handlers); h.current=handlers;
-  useEffect(()=>{
-    const el=ref.current; if(!el) return;
-    let x0=null, y0=0, t0=0;
-    const start=e=>{
-      const t=e.touches[0]; const w=window.innerWidth;
+  const st=useRef({el:null, x0:null, y0:0, t0:0});
+  const start=useRef(null), end=useRef(null);
+  if(!start.current){
+    start.current=e=>{
+      const t=e.touches[0]; const w=window.innerWidth; const k=st.current;
       // pas dans un champ de saisie, ni depuis le bord de l'écran (geste « retour » du téléphone)
-      if(e.touches.length>1 || e.target.closest('input,textarea,select,.no-swipe') || t.clientX<24 || t.clientX>w-24){ x0=null; return; }
-      x0=t.clientX; y0=t.clientY; t0=Date.now();
+      if(e.touches.length>1 || e.target.closest('input,textarea,select,.no-swipe') || t.clientX<24 || t.clientX>w-24){ k.x0=null; return; }
+      k.x0=t.clientX; k.y0=t.clientY; k.t0=Date.now();
     };
-    const end=e=>{
-      if(x0===null) return; const t=e.changedTouches[0]; const dx=t.clientX-x0, dy=t.clientY-y0; x0=null;
-      if(Date.now()-t0>700 || Math.abs(dx)<60 || Math.abs(dy)>Math.abs(dx)*0.6) return;
+    end.current=e=>{
+      const k=st.current; if(k.x0===null) return; const t=e.changedTouches[0]; const dx=t.clientX-k.x0, dy=t.clientY-k.y0; k.x0=null;
+      if(Date.now()-k.t0>700 || Math.abs(dx)<60 || Math.abs(dy)>Math.abs(dx)*0.6) return;
       (dx<0 ? h.current.onLeft : h.current.onRight)?.();
     };
-    el.addEventListener('touchstart',start,{passive:true}); el.addEventListener('touchend',end,{passive:true});
-    return ()=>{ el.removeEventListener('touchstart',start); el.removeEventListener('touchend',end); };
-  },[]);
+  }
+  const refCb=useRef(null);
+  if(!refCb.current) refCb.current = el=>{
+    const k=st.current; if(k.el===el) return;
+    if(k.el){ k.el.removeEventListener('touchstart',start.current); k.el.removeEventListener('touchend',end.current); }
+    k.el=el;
+    if(el){ el.addEventListener('touchstart',start.current,{passive:true}); el.addEventListener('touchend',end.current,{passive:true}); }
+  };
+  return refCb.current;
 }
 
 /* ---------------- gestion des fenêtres (pile) ---------------- */
@@ -1377,8 +1384,7 @@ function DocEditor({doc, isNew, onClose}){
   const addLine = (l)=>setD(x=>({...x, lines:[...(x.lines||[]), {id:uid(), title:l?.title||'', description:l?.description||'', qty:1, unit:l?.unit||0, qunit:l?.qunit||'', disc:0, discKind:'%', vat: vatOn(p)?(l?.vat??20):0}]}));
   const [tab,setTab] = useState('edit');
   const [opts,setOpts] = useState({});
-  const gridRef = useRef(null);
-  useSwipe(gridRef, {onRight:()=>setTab('preview'), onLeft:()=>setTab('edit')});
+  const gridRef = useSwipe({onLeft:()=>setTab('preview'), onRight:()=>setTab('edit')});
   const dirty = JSON.stringify(d)!==JSON.stringify(live||{});
   async function save(silent){ const cur=S.docs.find(x=>x.id===d.id); if(cur?.number && !d.number){ setD(clone(cur)); return cur; } const o=clone(d); o.lines=(o.lines||[]).map(l=>({...l, qty:Number(l.qty)||0, unit:Math.round((Number(l.unit)||0)*10000)/10000, vat:Number(l.vat)||0, disc:Number(l.disc)||0})); o.deposit=r2(o.deposit); o.remisePct=Number(o.remisePct)||0; o.updatedAt=new Date().toISOString(); await put('docs',o); setD(o); if(!silent) toast('Enregistré'); return o; }
   function finalize(){
@@ -1876,8 +1882,7 @@ function AgendaView(){
   const byDate={}; S.events.forEach(e=>{ (byDate[e.date]=byDate[e.date]||[]).push(e); });
   const [slide,setSlide]=useState('');
   const shift=n=>{ setSlide(n>0?'next':'prev'); setCur(c=>{ const d=new Date(c.y,c.m+n,1); return {y:d.getFullYear(), m:d.getMonth()}; }); };
-  const calRef=useRef(null);
-  useSwipe(calRef, {onLeft:()=>shift(1), onRight:()=>shift(-1)});
+  const calRef=useSwipe({onLeft:()=>shift(1), onRight:()=>shift(-1)});
   const selEvents=(byDate[sel]||[]).sort((a,b)=>(a.start||'').localeCompare(b.start||''));
   const upcoming=S.events.filter(e=>e.date>=todayISO()).sort((a,b)=>a.date.localeCompare(b.date)).slice(0,8);
   const rows = days.slice(35).every(d=>d.getMonth()!==cur.m) ? 35 : 42;
@@ -2278,6 +2283,20 @@ if(window.CABINE_CONFIG && 'serviceWorker' in navigator && !/claude\.ai|claudeus
   const l=document.createElement('link'); l.rel='manifest'; l.href='manifest.webmanifest'; document.head.appendChild(l);
   navigator.serviceWorker.register('sw.js').catch(()=>{});
 }
+/* Application installée : à l'ouverture et au retour sur l'appli, vérifier qu'on a bien la dernière version publiée. */
+async function checkUpdate(){
+  if(!window.CABINE_BUILD) return;
+  try{
+    const r=await fetch('version.json?t='+Date.now(), {cache:'no-store'}); if(!r.ok) return;
+    const v=(await r.json()).build;
+    if(v && v!==window.CABINE_BUILD){
+      // rien n'est perdu : chaque modification est enregistrée au fur et à mesure
+      if(!document.querySelector('.overlay')) location.reload();
+      else toast('Une nouvelle version de Cabine est disponible : elle sera chargée à la prochaine ouverture.');
+    }
+  }catch(_){}
+}
+if(window.CABINE_BUILD){ setTimeout(checkUpdate, 2000); document.addEventListener('visibilitychange', ()=>{ if(document.visibilityState==='visible') checkUpdate(); }); }
 ensureFonts();
 initStore().then(()=>render(html`<${App}/>`, document.getElementById('app')));
 </script>

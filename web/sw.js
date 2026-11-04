@@ -6,6 +6,7 @@ self.addEventListener('activate', e => { e.waitUntil(caches.keys().then(k => Pro
 self.addEventListener('fetch', e => {
   const u = new URL(e.request.url);
   if (e.request.method !== 'GET' || u.hostname.endsWith('supabase.co') || u.hostname.endsWith('googleapis.com') || u.hostname.endsWith('api.gouv.fr')) return;
-  // réseau d'abord, cache en secours
-  e.respondWith(fetch(e.request).then(r => { if (r.ok && (u.origin === location.origin || /cdnjs|jsdelivr|unpkg|fonts/.test(u.hostname))) { const c = r.clone(); caches.open(CACHE).then(x => x.put(e.request, c)); } return r; }).catch(() => caches.match(e.request)));
+  // réseau d'abord (sans cache du navigateur pour la page et la version), cache en secours
+  const fresh = e.request.mode === 'navigate' || u.pathname.endsWith('version.json') || u.pathname.endsWith('/index.html');
+  e.respondWith((fresh ? fetch(e.request.url, { cache: 'no-store', credentials: 'same-origin' }) : fetch(e.request)).then(r => { if (r.ok && (u.origin === location.origin || /cdnjs|jsdelivr|unpkg|fonts/.test(u.hostname))) { const c = r.clone(); caches.open(CACHE).then(x => x.put(e.request, c)); } return r; }).catch(() => caches.match(e.request)));
 });

@@ -141,12 +141,15 @@ jobs:
             echo '<meta name="theme-color" content="#3046c9"><link rel="icon" href="icon-192.png"><link rel="apple-touch-icon" href="icon-192.png">'
             echo '<style>:root{padding-top:env(safe-area-inset-top,0px);padding-bottom:env(safe-area-inset-bottom,0px)}body{margin:0;font:14px system-ui,sans-serif}img{max-width:100%}[hidden]{display:none!important}</style>'
             echo "<script>window.CABINE_CONFIG={supabaseUrl:'https://${PROJECT_REF}.supabase.co',supabaseAnonKey:'${ANON}'};</script>"
+            echo "<script>window.CABINE_BUILD='${GITHUB_SHA}';</script>"
             echo '</head><body>'
             cat index.html
             echo '</body></html>'
           } > _site/index.html
           cp reserver.html _site/
           cp -r web/. _site/
+          echo "{\"build\":\"${GITHUB_SHA}\"}" > _site/version.json
+          sed -i "s/cabine-v1/cabine-${GITHUB_SHA:0:8}/" _site/sw.js
           echo "window.CABINE_CONFIG={supabaseUrl:'https://${PROJECT_REF}.supabase.co',supabaseAnonKey:'${ANON}'};" > _site/config.js
       - uses: actions/configure-pages@v5
       - uses: actions/upload-pages-artifact@v3
