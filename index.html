@@ -126,6 +126,13 @@ label.f textarea{min-height:76px;resize:vertical}
 .legend .leg{display:inline-flex;align-items:center;gap:5px;border:1px solid var(--line);background:var(--surface);border-radius:999px;padding:3px 9px 3px 5px;font:inherit;font-size:.75rem;color:var(--ink-2);cursor:pointer}
 .legend .leg:hover{border-color:var(--ink-3);color:var(--ink)}
 .legend .leg i{width:12px;height:12px;border-radius:50%;display:inline-block;box-shadow:0 0 0 2px var(--surface),0 0 0 3px var(--line)}
+.cal{touch-action:pan-y}
+@media (prefers-reduced-motion:no-preference){
+  .cal.slide-next{animation:calNext .22s ease-out}.cal.slide-prev{animation:calPrev .22s ease-out}
+  @keyframes calNext{from{transform:translateX(28px);opacity:.3}to{transform:none;opacity:1}}
+  @keyframes calPrev{from{transform:translateX(-28px);opacity:.3}to{transform:none;opacity:1}}
+  @media (max-width:999px){.ed-grid[data-tab="preview"] .ed-prev{animation:calPrev .2s ease-out}.ed-grid[data-tab="edit"] .ed-form{animation:calNext .2s ease-out}}
+}
 .cal .more{font-size:.65rem;color:var(--ink-2);padding-left:4px}
 @media (min-width:700px){.cal .cell{min-height:100px;padding:4px}}
 @media (max-width:520px){.cal{gap:2px}.cal .cell{padding:2px 1px;min-height:64px;border-radius:6px}.cal .num{font-size:.72rem;height:18px;min-width:18px}.cal .ev{font-size:.56rem;letter-spacing:-.02em;padding:1px 1px 1px 2px;border-left-width:2px;border-radius:3px;text-overflow:clip}}
@@ -1054,6 +1061,28 @@ function Confirm({title, text, yes='Confirmer', danger, onYes, onClose}){
   <//>`;
 }
 
+/* ---------------- glisser à gauche / à droite (téléphone) ---------------- */
+function useSwipe(ref, handlers){
+  const h=useRef(handlers); h.current=handlers;
+  useEffect(()=>{
+    const el=ref.current; if(!el) return;
+    let x0=null, y0=0, t0=0;
+    const start=e=>{
+      const t=e.touches[0]; const w=window.innerWidth;
+      // pas dans un champ de saisie, ni depuis le bord de l'écran (geste « retour » du téléphone)
+      if(e.touches.length>1 || e.target.closest('input,textarea,select,.no-swipe') || t.clientX<24 || t.clientX>w-24){ x0=null; return; }
+      x0=t.clientX; y0=t.clientY; t0=Date.now();
+    };
+    const end=e=>{
+      if(x0===null) return; const t=e.changedTouches[0]; const dx=t.clientX-x0, dy=t.clientY-y0; x0=null;
+      if(Date.now()-t0>700 || Math.abs(dx)<60 || Math.abs(dy)>Math.abs(dx)*0.6) return;
+      (dx<0 ? h.current.onLeft : h.current.onRight)?.();
+    };
+    el.addEventListener('touchstart',start,{passive:true}); el.addEventListener('touchend',end,{passive:true});
+    return ()=>{ el.removeEventListener('touchstart',start); el.removeEventListener('touchend',end); };
+  },[]);
+}
+
 /* ---------------- gestion des fenêtres (pile) ---------------- */
 let pushSheet=null;
 function open(kind, props={}){ pushSheet && pushSheet({kind, props, key:uid()}); }
@@ -1348,6 +1377,8 @@ function DocEditor({doc, isNew, onClose}){
   const addLine = (l)=>setD(x=>({...x, lines:[...(x.lines||[]), {id:uid(), title:l?.title||'', description:l?.description||'', qty:1, unit:l?.unit||0, qunit:l?.qunit||'', disc:0, discKind:'%', vat: vatOn(p)?(l?.vat??20):0}]}));
   const [tab,setTab] = useState('edit');
   const [opts,setOpts] = useState({});
+  const gridRef = useRef(null);
+  useSwipe(gridRef, {onRight:()=>setTab('preview'), onLeft:()=>setTab('edit')});
   const dirty = JSON.stringify(d)!==JSON.stringify(live||{});
   async function save(silent){ const cur=S.docs.find(x=>x.id===d.id); if(cur?.number && !d.number){ setD(clone(cur)); return cur; } const o=clone(d); o.lines=(o.lines||[]).map(l=>({...l, qty:Number(l.qty)||0, unit:Math.round((Number(l.unit)||0)*10000)/10000, vat:Number(l.vat)||0, disc:Number(l.disc)||0})); o.deposit=r2(o.deposit); o.remisePct=Number(o.remisePct)||0; o.updatedAt=new Date().toISOString(); await put('docs',o); setD(o); if(!silent) toast('Enregistré'); return o; }
   function finalize(){
@@ -1401,7 +1432,7 @@ function DocEditor({doc, isNew, onClose}){
   return html`<${Sheet} wide title=${title} onClose=${async()=>{ if(!locked && dirty && (d.clientId||d.lines.length)) await save(true); onClose(); }}
       actions=${html`<button class="btn sm" onClick=${async()=>{ if(!locked && dirty) await save(true); downloadPdf(d); }}>PDF</button>`}>
     <div class="seg ed-tabs" style="align-self:center">${[['edit',locked?'Détails':'Modifier'],['preview','Aperçu du PDF']].map(([k,l])=>html`<button class=${tab===k?'on':''} onClick=${()=>setTab(k)}>${l}</button>`)}</div>
-    <div class="ed-grid" data-tab=${tab}>
+    <div class="ed-grid" data-tab=${tab} ref=${gridRef}>
     <div class="ed-form">
     <div class="row sb"><span class=${'pill '+st.k}>${st.l}</span>${d.copiedFrom && !d.number && html`<span class="tiny">Lignes reprises de ${d.copiedFrom}, dates mises à jour</span>`}${d.fromQuote && html`<span class="tiny">Issue du devis ${d.fromQuote}</span>`}</div>
     ${d.monthly && html`<div class="notice small"><b>Facture du mois de ${monthLabel(d.billingMonth)}</b> · ${d.monthCount||0} date${(d.monthCount||0)>1?'s':''}. ${!d.number?'Les dates ajoutées ou retirées dans l’agenda mettent à jour la liste et la quantité automatiquement ; vous pouvez modifier les prix.':''}</div>`}
@@ -1843,7 +1874,10 @@ function AgendaView(){
   const first=new Date(cur.y,cur.m,1); const startOff=(first.getDay()+6)%7;
   const days=[]; for(let i=0;i<42;i++){ const d=new Date(cur.y,cur.m,1-startOff+i); days.push(d); }
   const byDate={}; S.events.forEach(e=>{ (byDate[e.date]=byDate[e.date]||[]).push(e); });
-  const shift=n=>setCur(c=>{ const d=new Date(c.y,c.m+n,1); return {y:d.getFullYear(), m:d.getMonth()}; });
+  const [slide,setSlide]=useState('');
+  const shift=n=>{ setSlide(n>0?'next':'prev'); setCur(c=>{ const d=new Date(c.y,c.m+n,1); return {y:d.getFullYear(), m:d.getMonth()}; }); };
+  const calRef=useRef(null);
+  useSwipe(calRef, {onLeft:()=>shift(1), onRight:()=>shift(-1)});
   const selEvents=(byDate[sel]||[]).sort((a,b)=>(a.start||'').localeCompare(b.start||''));
   const upcoming=S.events.filter(e=>e.date>=todayISO()).sort((a,b)=>a.date.localeCompare(b.date)).slice(0,8);
   const rows = days.slice(35).every(d=>d.getMonth()!==cur.m) ? 35 : 42;
@@ -1857,9 +1891,9 @@ function AgendaView(){
   useEffect(()=>{ const f=()=>setWide(window.innerWidth>=700); addEventListener('resize',f); return ()=>removeEventListener('resize',f); },[]);
   return html`<div class="wrap">
     <div class="row sb"><div><h1>Agenda</h1>${googleOn() && html`<div class="tiny">${backend.lastSync?'Synchronisé avec Google à '+backend.lastSync.toLocaleTimeString('fr-FR',{hour:'2-digit',minute:'2-digit'}):'Synchronisation avec Google…'} · <button class="btn ghost sm" style="min-height:0;padding:0 4px" onClick=${async()=>{ await syncOnOpen(); toast('Agenda synchronisé'); }}>Actualiser</button></div>`}</div><button class="btn pri" onClick=${()=>open('event',{preset:{date:sel}})}>Ajouter une date</button></div>
-    <div class="card stack">
+    <div class="card stack" ref=${calRef} style="touch-action:pan-y">
       <div class="row sb"><button class="btn sm" onClick=${()=>shift(-1)} aria-label="Mois précédent">‹</button><h2 style="text-transform:capitalize">${MONTHS[cur.m]} ${cur.y}</h2><button class="btn sm" onClick=${()=>shift(1)} aria-label="Mois suivant">›</button></div>
-      <div class="cal">${['lun','mar','mer','jeu','ven','sam','dim'].map(d=>html`<div class="dow">${d}</div>`)}
+      <div class=${'cal'+(slide?' slide-'+slide:'')} key=${cur.y+'-'+cur.m}>${['lun','mar','mer','jeu','ven','sam','dim'].map(d=>html`<div class="dow">${d}</div>`)}
         ${days.slice(0,rows).map(d=>{ const k=iso(d); const evs=(byDate[k]||[]).slice().sort((a,b)=>(a.start||'').localeCompare(b.start||'')); const ovs=ovBy[k]||[];
           const max=wide?4:3; const all=[...evs.map(e=>({t:'c',e})), ...ovs.map(e=>({t:'g',e}))]; const shown=all.slice(0, all.length>max?max-1:max);
           return html`<div role="button" tabindex="0" class=${['cell', d.getMonth()!==cur.m&&'out', k===todayISO()&&'today', k===sel&&'sel'].filter(Boolean).join(' ')} onClick=${()=>setSel(k)} onKeyDown=${ev=>{ if(ev.key==='Enter') setSel(k); }} aria-label=${fdateLong(k)}>
