@@ -42,7 +42,29 @@ Deno.serve(async (req) => {
 
       case "calendars": {
         const r = await gfetch(token, `${CAL}/users/me/calendarList?minAccessRole=writer`);
-        return json({ items: (r.items || []).map((c: any) => ({ id: c.id, name: c.summaryOverride || c.summary, primary: !!c.primary })) });
+        return json({ items: (r.items || []).map((c: any) => ({ id: c.id, name: c.summaryOverride || c.summary, primary: !!c.primary, color: c.backgroundColor || "" })) });
+      }
+
+      case "overlay": {
+        // événements des autres agendas, en lecture seule, pour la période affichée
+        const ids: string[] = (Array.isArray(body.calendarIds) ? body.calendarIds : []).slice(0, 10);
+        const timeMin = new Date(body.timeMin).toISOString(), timeMax = new Date(body.timeMax).toISOString();
+        const out: any[] = [];
+        await Promise.all(ids.map(async (id) => {
+          let pageToken = "";
+          do {
+            const q = new URLSearchParams({ timeMin, timeMax, singleEvents: "true", orderBy: "startTime", maxResults: "250" });
+            if (pageToken) q.set("pageToken", pageToken);
+            const r = await gfetch(token, `${CAL}/calendars/${encodeURIComponent(id)}/events?${q}`).catch(() => ({ items: [] }));
+            for (const e of r.items || []) {
+              if (e.status === "cancelled" || e.transparency === "transparent" && !e.start?.date) continue;
+              out.push({ id: e.id, calendarId: id, summary: e.summary || "(sans titre)", location: e.location || "",
+                start: e.start?.dateTime || e.start?.date || "", end: e.end?.dateTime || e.end?.date || "", allDay: !!e.start?.date, link: e.htmlLink || "" });
+            }
+            pageToken = r.nextPageToken || "";
+          } while (pageToken);
+        }));
+        return json({ items: out });
       }
 
       case "create-calendar": {

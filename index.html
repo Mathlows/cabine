@@ -121,6 +121,8 @@ label.f textarea{min-height:76px;resize:vertical}
 .cal .dots i{width:6px;height:6px;border-radius:50%;background:var(--accent)}
 .cal button.sel .dots i{background:var(--accent-ink)}
 .cal .dots i.rdv{background:var(--warn)}
+.cal .dots i.ext{background:var(--ink-3);opacity:.75}
+.cal button.sel .dots i.ext{outline:1px solid var(--accent-ink)}
 .notice{border-radius:var(--r);padding:12px 14px;background:var(--accent-soft);color:var(--ink);font-size:.9rem}
 .notice.warn{background:var(--warn-soft)}
 .empty{text-align:center;padding:28px 16px;color:var(--ink-2)}
@@ -1282,6 +1284,9 @@ function EventForm({event, preset, onClose}){
     toast(isPresta && mk && !event ? 'Date ajoutée, facture brouillon créée' : 'Date enregistrée'); onClose();
   }
   const linked = S.docs.find(x=>x.id===f.invoiceId);
+  const [busy,setBusy]=useState([]);
+  useEffect(()=>{ let alive=true; if(f.date) loadOverlay(f.date,f.date).then(x=>{ if(alive) setBusy((overlayByDate(x)[f.date])||[]); }); return ()=>{ alive=false; }; },[f.date]);
+  const sameDay = S.events.filter(e=>e.date===f.date && e.id!==f.id);
   return html`<${Sheet} title=${event?'Modifier la date':'Nouvelle date'} onClose=${onClose} actions=${html`<button class="btn pri sm" onClick=${save}>Enregistrer</button>`}>
     <div class="seg">${[['presta','Prestation DJ'],['rdv','Rendez-vous client']].map(([k,l])=>html`<button class=${f.kind===k?'on':''} onClick=${()=>setF(x=>({...x,kind:k}))}>${l}</button>`)}</div>
     <${ClientPicker} value=${f.clientId} onChange=${v=>setF(x=>({...x,clientId:v}))}/>
@@ -1294,6 +1299,7 @@ function EventForm({event, preset, onClose}){
       <${TA} label=${isPresta?'Notes (contact sur place, playlist, déroulé…)':'Notes de préparation du rendez-vous'} ...${b('notes')}/>
       ${S.profiles.length>1 && html`<${Sel} label="Profil" value=${f.profileId} onChange=${v=>setF(x=>({...x,profileId:v}))} options=${S.profiles.map(x=>[x.id,x.tradeName||x.ownerName])}/>`}
     </div>
+    ${(busy.length>0 || sameDay.length>0) && html`<div class="notice warn small"><b>Déjà prévu ce jour-là :</b> ${[...sameDay.map(e=>(e.kind==='rdv'?'RDV ':'')+(e.clientId&&clientById(e.clientId)?clientName(clientById(e.clientId)):(e.location||'Date DJ'))+(e.start?' ('+e.start+')':'')), ...busy.map(e=>e.summary+(e.allDay?'':' ('+e.startTime+'–'+e.endTime+')'))].join(' · ')}</div>`}
     ${isPresta && !f.invoiceId && html`<label class="check"><input type="checkbox" checked=${mk} onChange=${e=>setMk(e.target.checked)}/><span>Créer la facture brouillon pour cette date${prev?html`<br/><span class="tiny">Les lignes de la dernière facture de ce client (${prev.number||'brouillon'}, ${eur(computeTotals(prev,docProfile(prev)).ttc)}) seront reprises.</span>`:''}</span></label>`}
     ${linked && html`<div class="card row sb"><div><div style="font-weight:600">Facture liée</div><div class="tiny">${linked.number||'Brouillon'} · ${eur(computeTotals(linked,docProfile(linked)).ttc)}</div></div><button class="btn sm" onClick=${()=>open('doc',{doc:linked})}>Ouvrir</button></div>`}
     ${event && html`<button class="btn danger" onClick=${()=>{ const inv=S.docs.find(x=>x.id===event.invoiceId); const draft=inv&&inv.status==='brouillon';
@@ -1309,6 +1315,61 @@ function EventList({events}){
       ${inv ? html`<span class=${'pill '+docState(inv).k}>${docState(inv).l}</span>` : (e.kind==='rdv'? html`<span class="pill">RDV</span>`:'')}
     </button>`; })}</div>`;
 }
+/* ---------------- autres agendas Google (lecture seule, non enregistrés) ---------------- */
+const OV = {cals:null, cache:{}, loading:{}};
+function overlayIds(){
+  const st=settings(); if(!googleOn() && backend.mode!=='supabase') return [];
+  if(Array.isArray(st.overlayCals)) return st.overlayCals.filter(id=>id!==st.calendarId);
+  return st.calendarId==='primary' ? [] : ['primary'];
+}
+async function overlayCalendars(){
+  if(OV.cals) return OV.cals;
+  try{ OV.cals=(await gcall('calendars')).items||[]; }catch(e){ OV.cals=[]; }
+  return OV.cals;
+}
+/* Récupère les événements des autres agendas entre deux dates (AAAA-MM-JJ, incluses) ; résultat mis en cache 5 min. */
+async function loadOverlay(from, to, force){
+  const ids=overlayIds(); if(backend.mode!=='supabase' || !ids.length) return [];
+  const key=ids.join(',')+'|'+from+'|'+to; const c=OV.cache[key];
+  if(c && !force && Date.now()-c.at<5*60*1000) return c.items;
+  if(OV.loading[key]) return OV.loading[key];
+  OV.loading[key]=(async()=>{
+    try{
+      const r=await gcall('overlay',{calendarIds:ids, timeMin:new Date(from+'T00:00:00').toISOString(), timeMax:new Date(addDays(to,1)+'T00:00:00').toISOString()});
+      const cals=await overlayCalendars();
+      const items=(r.items||[]).map(e=>{ const cal=cals.find(x=>x.id===e.calendarId)||{}; const s=parisParts(e.start,e.allDay), en=parisParts(e.end,e.allDay);
+        const last = e.allDay ? addDays(en.date,-1) : (en.time==='00:00' && en.date>s.date ? addDays(en.date,-1) : en.date);
+        return {...e, calName:cal.name||'', color:cal.color||'', date:s.date, lastDate:last<s.date?s.date:last, startTime:e.allDay?'':s.time, endTime:e.allDay?'':en.time}; });
+      OV.cache[key]={at:Date.now(), items}; emit(); return items;
+    }catch(e){ console.warn('Agendas Google', e); return []; }
+    finally{ delete OV.loading[key]; }
+  })();
+  return OV.loading[key];
+}
+function overlayByDate(items){
+  const m={}; for(const e of items||[]){ let d=e.date, n=0; while(d<=e.lastDate && n<62){ (m[d]=m[d]||[]).push(e); d=addDays(d,1); n++; } }
+  Object.values(m).forEach(l=>l.sort((a,b)=>(a.startTime||'').localeCompare(b.startTime||'')));
+  return m;
+}
+function OverlayList({items}){
+  if(!items?.length) return null;
+  return html`<div class="list">${items.map(e=>html`<a class="item" href=${e.link||'#'} target="_blank" rel="noopener" style="text-decoration:none;color:inherit">
+    <span style=${`width:10px;height:10px;border-radius:50%;flex:none;background:${e.color||'var(--ink-3)'}`}></span>
+    <div class="grow"><div class="t" style="font-weight:500">${e.summary}</div><div class="tiny">${e.allDay?'Toute la journée':`${e.startTime}–${e.endTime}`}${e.location?' · '+e.location:''}${e.calName?' · '+e.calName:''}</div></div>
+    <span class="tiny">Google</span></a>`)}</div>`;
+}
+function OverlaySettings(){
+  useStore(); const st=settings(); const [cals,setCals]=useState(OV.cals);
+  useEffect(()=>{ overlayCalendars().then(setCals); },[]);
+  const list=(cals||[]).filter(c=>c.id!==st.calendarId);
+  if(!cals) return html`<div class="tiny">Chargement de vos agendas…</div>`;
+  if(!list.length) return null;
+  const ids=overlayIds();
+  return html`<div class="sect"><div class="lab">Afficher aussi dans le calendrier de Cabine</div>
+    ${list.map(c=>html`<label class="check"><input type="checkbox" checked=${ids.includes(c.id)} onChange=${e=>{ const cur=overlayIds(); const next=e.target.checked?[...new Set([...cur,c.id])]:cur.filter(x=>x!==c.id); OV.cache={}; saveSettings({overlayCals:next}); }}/><span><span style=${`display:inline-block;width:10px;height:10px;border-radius:50%;margin-right:6px;background:${c.color||'var(--ink-3)'}`}></span>${c.name}${c.primary?' (principal)':''}</span></label>`)}
+    <div class="tiny">En lecture seule : ces événements ne sont pas copiés dans Cabine et ne créent pas de facture.</div></div>`;
+}
+
 function AgendaView(){
   useStore();
   const [cur,setCur]=useState(()=>{ const d=new Date(); return {y:d.getFullYear(), m:d.getMonth()}; });
@@ -1320,18 +1381,23 @@ function AgendaView(){
   const selEvents=(byDate[sel]||[]).sort((a,b)=>(a.start||'').localeCompare(b.start||''));
   const upcoming=S.events.filter(e=>e.date>=todayISO()).sort((a,b)=>a.date.localeCompare(b.date)).slice(0,8);
   const rows = days.slice(35).every(d=>d.getMonth()!==cur.m) ? 35 : 42;
+  const [ovItems,setOv]=useState([]);
+  const ovFrom=iso(days[0]), ovTo=iso(days[rows-1]), ovKey=overlayIds().join(',');
+  useEffect(()=>{ let alive=true; const go=f=>loadOverlay(ovFrom,ovTo,f).then(x=>{ if(alive) setOv(x); }); go(); const t=setInterval(()=>go(true),5*60*1000); return ()=>{ alive=false; clearInterval(t); }; },[ovFrom,ovTo,ovKey]);
+  const ovBy=overlayByDate(ovItems);
   return html`<div class="wrap">
     <div class="row sb"><h1>Agenda</h1><button class="btn pri" onClick=${()=>open('event',{preset:{date:sel}})}>Ajouter une date</button></div>
     <div class="card stack">
       <div class="row sb"><button class="btn sm" onClick=${()=>shift(-1)} aria-label="Mois précédent">‹</button><h2 style="text-transform:capitalize">${MONTHS[cur.m]} ${cur.y}</h2><button class="btn sm" onClick=${()=>shift(1)} aria-label="Mois suivant">›</button></div>
       <div class="cal">${['lun','mar','mer','jeu','ven','sam','dim'].map(d=>html`<div class="dow">${d}</div>`)}
         ${days.slice(0,rows).map(d=>{ const k=iso(d); const evs=byDate[k]||[]; return html`<button class=${[d.getMonth()!==cur.m&&'out', k===todayISO()&&'today', k===sel&&'sel'].filter(Boolean).join(' ')} onClick=${()=>setSel(k)} aria-label=${fdateLong(k)}>
-          <span>${d.getDate()}</span><span class="dots">${evs.slice(0,3).map(e=>html`<i class=${e.kind==='rdv'?'rdv':''}></i>`)}</span></button>`; })}
+          <span>${d.getDate()}</span><span class="dots">${evs.slice(0,3).map(e=>html`<i class=${e.kind==='rdv'?'rdv':''}></i>`)}${(ovBy[k]||[]).slice(0,Math.max(0,4-Math.min(3,evs.length))).map(e=>html`<i class="ext" style=${e.color?`background:${e.color}`:''}></i>`)}</span></button>`; })}
       </div>
-      <div class="row tiny"><span class="row" style="gap:4px"><i style="width:8px;height:8px;border-radius:50%;background:var(--accent);display:inline-block"></i>Prestation</span><span class="row" style="gap:4px"><i style="width:8px;height:8px;border-radius:50%;background:var(--warn);display:inline-block"></i>Rendez-vous</span></div>
+      <div class="row tiny"><span class="row" style="gap:4px"><i style="width:8px;height:8px;border-radius:50%;background:var(--accent);display:inline-block"></i>Prestation</span><span class="row" style="gap:4px"><i style="width:8px;height:8px;border-radius:50%;background:var(--warn);display:inline-block"></i>Rendez-vous</span>${ovKey && html`<span class="row" style="gap:4px"><i style="width:8px;height:8px;border-radius:50%;background:var(--ink-3);display:inline-block"></i>Autres agendas</span>`}</div>
     </div>
     <div class="sect"><div class="lab" style="text-transform:none;letter-spacing:0;font-size:.95rem;color:var(--ink)">${fdateLong(sel)}</div>
-      ${selEvents.length ? html`<${EventList} events=${selEvents}/>` : html`<div class="muted small">Rien de prévu ce jour-là.</div>`}</div>
+      ${selEvents.length ? html`<${EventList} events=${selEvents}/>` : (ovBy[sel]?.length ? '' : html`<div class="muted small">Rien de prévu ce jour-là.</div>`)}
+      ${ovBy[sel]?.length ? html`<div class="tiny" style="margin-top:2px">Dans vos autres agendas Google</div><${OverlayList} items=${ovBy[sel]}/>` : ''}</div>
     <div class="sect"><div class="lab">Prochaines dates</div>${upcoming.length? html`<${EventList} events=${upcoming}/>` : html`<div class="muted small">Aucune date à venir.</div>`}</div>
     <${BookingList}/>
     ${backend.mode!=='supabase' && html`<div class="notice small">La synchronisation Google Agenda et la page de réservation sont disponibles sur la version installée de Cabine.</div>`}
@@ -1642,6 +1708,7 @@ function GoogleCard(){
     <div class="small">${status==null?'Vérification…': status.connected ? html`Connecté : <b>${status.email}</b> (Gmail et Agenda)` : html`<span style="color:var(--bad)">Google n’est pas relié (${status.error}). Déconnectez-vous puis reconnectez-vous.</span>`}</div>
     <label class="f">Agenda à synchroniser<select value=${st.calendarId||''} onChange=${e=>saveSettings({calendarId:e.target.value, calendarSync:!!e.target.value})}><option value="">— Aucun —</option>${(cals||[]).map(c=>html`<option value=${c.id}>${c.name}${c.primary?' (principal)':''}</option>`)}</select></label>
     <div class="row">${!(cals||[]).some(c=>c.name==='DJ') && html`<button class="btn sm" onClick=${createCal}>Créer un agenda « DJ »</button>`}${st.calendarId && html`<button class="btn sm" onClick=${syncAll}>Synchroniser maintenant</button>`}</div>
+    <${OverlaySettings}/>
     <div class="tiny">Chaque date ajoutée dans Cabine apparaît dans cet agenda (titre : lieu · client). Une date ajoutée dans cet agenda depuis votre téléphone arrive dans Cabine avec sa facture brouillon. Le widget Google Agenda de votre Pixel affiche alors vos dates.</div>
   </div>`;
 }
