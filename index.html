@@ -335,7 +335,7 @@ async function pullGoogle(){
         const isRdv=/^rdv\b/i.test(g.summary); const parts=g.summary.replace(/^rdv\s*[·:-]?\s*/i,'').split(' · ').map(x=>x.trim());
         const client=S.clients.find(c=>parts.some(x=>x && clientName(c).toLowerCase()===x.toLowerCase())) || matchClient(g.summary+' '+(g.location||''));
         const rest=parts.filter(x=>x && !(client && matchClient(x)?.id===client.id));
-        const place = isRdv ? g.location : (g.location || (client ? (rest[0] || lastLocationFor(client.id)) : g.summary));
+        const place = isRdv ? g.location : placeFor(client, rest.join(' ') || g.summary, g.location);
         const ev={id:uid(), kind:isRdv?'rdv':'presta', profileId:activeProfile()?.id||'', clientId:client?.id||'', date:st.date, start:g.allDay?'20:00':st.time, end:g.allDay?'02:00':en.time, eventType:'', location:place||'', notes:g.description||'', googleId:g.googleId, invoiceId:'', fromGoogle:true, googleTitle:g.summary, googleLocation:g.location||''};
         if(!isRdv){ const inv=draftFromEvent(ev); ev.invoiceId=inv.id; await put('docs',inv); }
         await put('events',ev);
@@ -1073,7 +1073,7 @@ function ClientsView(){
     <div class="row sb"><h1>Clients</h1><button class="btn pri" onClick=${()=>open('client')}>Nouveau client</button></div>
     <input class="inp" id="client-q" placeholder="Rechercher un client" value=${q} onInput=${e=>setQ(e.target.value)}/>
     ${list.length ? html`<div class="list">${list.map(c=>html`<button class="item" onClick=${()=>open('clientView',{clientId:c.id})}>
-      <div class="grow"><div class="t">${clientName(c)}</div><div class="tiny">${c.kind==='entreprise'?'Entreprise':'Particulier'}${c.city?' · '+c.city:''}</div></div>
+      <div class="grow"><div class="t">${c.color?html`<span style=${`display:inline-block;width:9px;height:9px;border-radius:50%;margin-right:6px;background:${c.color}`}></span>`:''}${clientName(c)}</div><div class="tiny">${c.kind==='entreprise'?'Entreprise':'Particulier'}${c.city?' · '+c.city:''}${c.keywords?html` · <span style="color:var(--accent)">mots-clés : ${c.keywords}</span>`:''}</div></div>
       <span class="tiny">${S.docs.filter(d=>d.clientId===c.id).length} doc.</span></button>`)}</div>`
     : html`<div class="card empty"><h3>Aucun client${q?' trouvé':''}</h3><p>Ajoutez vos clients une fois, puis retrouvez-les dans vos factures et votre agenda.</p></div>`}
   </div>`;
@@ -1292,6 +1292,7 @@ function EventForm({event, preset, onClose}){
   const p = activeProfile();
   const [f,setF,b] = useForm(event || {id:uid(), kind:'presta', profileId:p?.id||'', clientId:'', date:todayISO(), start:'20:00', end:'02:00', eventType:'', location:'', notes:'', invoiceId:'', ...(preset||{})});
   const [mk,setMk] = useState(!event);
+  const [learn,setLearn] = useState(true);
   const isPresta = f.kind==='presta';
   const prev = f.clientId ? lastInvoiceForClient(f.clientId, f.profileId) : null;
   async function save(){
@@ -1303,16 +1304,23 @@ function EventForm({event, preset, onClose}){
     if(inv && inv.status==='brouillon' && event){ await put('docs',{...inv, eventDate:o.date, eventType:o.eventType, eventLocation:o.location, clientId: inv.clientId||o.clientId}); }
     await put('events', o);
     if(o.fromGoogle) OV.cache={};
+    if(canLearn && learn){ const c=clientById(o.clientId); const kw=cleanTitle(o.googleTitle);
+      await put('clients', {...c, keywords:[...String(c.keywords||'').split(',').map(x=>x.trim()).filter(Boolean), kw].join(', ')});
+      await rematchGoogleEvents(); }
     toast(isPresta && mk && !event ? 'Date ajoutée, facture brouillon créée' : 'Date enregistrée'); onClose();
   }
   const linked = S.docs.find(x=>x.id===f.invoiceId);
+  // titre Google non reconnu (ou reconnu comme un autre client) : proposer de retenir ce mot pour le client choisi
+  const gTitle = cleanTitle(f.googleTitle);
+  const canLearn = !!(f.fromGoogle && gTitle && gTitle.length>=3 && f.clientId && clientById(f.clientId) && matchClient(gTitle)?.id!==f.clientId && !STOP.has(norm(gTitle)));
   const [busy,setBusy]=useState([]);
   useEffect(()=>{ let alive=true; if(f.date) loadOverlay(f.date,f.date).then(x=>{ if(alive) setBusy((overlayByDate(x)[f.date])||[]); }); return ()=>{ alive=false; }; },[f.date]);
   const sameDay = S.events.filter(e=>e.date===f.date && e.id!==f.id);
   return html`<${Sheet} title=${event?'Modifier la date':'Nouvelle date'} onClose=${onClose} actions=${html`<button class="btn pri sm" onClick=${save}>Enregistrer</button>`}>
     ${!event && f.fromGoogle && html`<div class="notice small">Événement de votre agenda Google${f.googleCalName?' « '+f.googleCalName+' »':''} : <b>${f.googleTitle}</b>. Touchez <b>Enregistrer</b> pour l’ajouter à Cabine${f.kind==='presta'?' avec sa facture provisoire':''} ; il sera déplacé dans votre agenda « DJ ». Si c’est un événement personnel, fermez simplement.${f.googleLink?html` <a href=${f.googleLink} target="_blank" rel="noopener">Voir dans Google Agenda</a>`:''}</div>`}
     <div class="seg">${[['presta','Prestation DJ'],['rdv','Rendez-vous client']].map(([k,l])=>html`<button class=${f.kind===k?'on':''} onClick=${()=>setF(x=>({...x,kind:k}))}>${l}</button>`)}</div>
-    <${ClientPicker} value=${f.clientId} onChange=${v=>setF(x=>({...x,clientId:v}))}/>
+    <${ClientPicker} value=${f.clientId} onChange=${v=>setF(x=>({...x, clientId:v, location: (x.fromGoogle && !x.googleLocation && v && clientById(v) && !matchedByName(clientById(v), x.googleTitle||'')) ? cleanTitle(x.googleTitle) : x.location}))}/>
+    ${canLearn && html`<label class="check"><input type="checkbox" checked=${learn} onChange=${e=>setLearn(e.target.checked)}/><span>Retenir « ${gTitle} » pour reconnaître <b>${clientName(clientById(f.clientId))}</b> la prochaine fois<br/><span class="tiny">Le mot sera ajouté aux mots-clés du client ; les autres « ${gTitle} » de votre agenda lui seront aussi rattachés.</span></span></label>`}
     <div class="fields">
       <${F} label="Date" type="date" ...${b('date')}/>
       <${F} label="Début" type="time" ...${b('start')}/>
@@ -1359,6 +1367,19 @@ function matchClient(text){
   }
   return tie ? null : best;
 }
+/* Le titre désigne-t-il le client par son nom (« deli » → DELICATESSEN) ou par un mot-clé (« Vogue » → Complexe et loisirs) ? */
+function matchedByName(c, text){
+  const t=norm(text); const names=[clientName(c), c.company, [c.firstName,c.lastName].filter(Boolean).join(' ')].map(norm).filter(Boolean);
+  const words=t.split(' ').filter(w=>w.length>=4 && !STOP.has(w));
+  return names.some(n=>t.includes(n) || (t.length>=5 && n.includes(t)) || words.some(w=>n.split(' ').some(x=>x.startsWith(w))));
+}
+const cleanTitle = t => String(t||'').replace(/^rdv\s*[·:-]?\s*/i,'').trim();
+/* Lieu proposé pour un événement Google rattaché au client c */
+function placeFor(c, title, googleLocation){
+  if(googleLocation) return googleLocation;
+  if(c && !matchedByName(c, title)) return cleanTitle(title);   // mot-clé = nom du lieu (« Vogue »)
+  return c ? lastLocationFor(c.id) : cleanTitle(title);
+}
 function lastLocationFor(clientId){
   const ev=S.events.filter(e=>e.clientId===clientId && e.location).sort((a,b)=>b.date.localeCompare(a.date))[0];
   return ev?.location || lastInvoiceForClient(clientId)?.eventLocation || '';
@@ -1368,7 +1389,7 @@ async function rematchGoogleEvents(){
   let n=0;
   for(const e of S.events.filter(x=>x.fromGoogle && !x.clientId)){
     const c=matchClient((e.googleTitle||e.location||'')+' '+(e.googleLocation||'')); if(!c) continue;
-    const upd={...e, clientId:c.id, location: e.googleLocation || lastLocationFor(c.id) || e.location};
+    const upd={...e, clientId:c.id, location: placeFor(c, e.googleTitle||e.location||'', e.googleLocation) || e.location};
     await put('events', upd, {noSync:true});
     const inv=S.docs.find(d=>d.id===e.invoiceId);
     if(inv && inv.status==='brouillon'){
@@ -1533,14 +1554,14 @@ function overlayByDate(items){
 function overlayPreset(o){
   const c=matchClient(o.summary+' '+(o.location||''));
   return {kind:/^rdv\b/i.test(o.summary)?'rdv':'presta', profileId:activeProfile()?.id||'', clientId:c?.id||'', date:o.date,
-    start:o.startTime||'20:00', end:o.endTime||'02:00', eventType:'', location:o.location||(c?lastLocationFor(c.id):'')||'', notes:'',
+    start:o.startTime||'20:00', end:o.endTime||'02:00', eventType:'', location:placeFor(c, o.summary, o.location)||'', notes:'',
     googleId:o.id, googleCal:o.calendarId, fromGoogle:true, googleTitle:o.summary, googleLocation:o.location||'', googleLink:o.link||'', googleCalName:o.calName||'', invoiceId:''};
 }
 function openOverlay(o){ open('event', {preset:overlayPreset(o)}); }
 async function importOverlayEvent(o){
   const c=matchClient(o.summary+' '+(o.location||''));
   const ev={id:uid(), kind:/^rdv\b/i.test(o.summary)?'rdv':'presta', profileId:activeProfile()?.id||'', clientId:c?.id||'', date:o.date,
-    start:o.startTime||'20:00', end:o.endTime||'02:00', eventType:'', location:o.location||(c?lastLocationFor(c.id):o.summary)||'', notes:'',
+    start:o.startTime||'20:00', end:o.endTime||'02:00', eventType:'', location:placeFor(c, o.summary, o.location)||'', notes:'',
     googleId:o.id, googleCal:o.calendarId, fromGoogle:true, googleTitle:o.summary, googleLocation:o.location||'', invoiceId:''};
   if(ev.kind==='presta'){ const inv=draftFromEvent(ev); ev.invoiceId=inv.id; await put('docs',inv); }
   await put('events', ev);   // l'envoi vers Google déplace l'événement dans l'agenda synchronisé
