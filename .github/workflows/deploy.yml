@@ -78,6 +78,15 @@ jobs:
               echo "Accès au compte entreprise ($F) : HTTP $ME — $(jq -r '.error.message // .message // .error // empty' /tmp/me.json 2>/dev/null | cut -c1-160)"
               echo "Champs du compte : $(jq -r 'keys | join(", ")' /tmp/me.json 2>/dev/null)"
               echo "Indicateurs d'environnement : $(jq -c '[paths(scalars) as $p | select(($p|map(tostring)|join(".")|test("sandbox|env|mode|live|test";"i"))) | {($p|map(tostring)|join(".")): getpath($p)}]' /tmp/me.json 2>/dev/null)"
+              if jq -e '.env=="sandbox"' /tmp/me.json >/dev/null 2>&1; then
+                T=$(curl -sS -o /tmp/ti.out -w "%{http_code} %{content_type}" "${SUPERPDP_API_URL:-https://api.superpdp.tech/v1.beta}/invoices/generate_test_invoice" -H "Authorization: Bearer $TOK")
+                echo "Facture de test fournie par le bac à sable : HTTP $T"
+                echo "Identifiants trouvés dans l'exemple (entreprises fictives) :"
+                grep -oE 'schemeID="[0-9A-Z]+">[^<]{1,40}<|"(scheme|electronic_address|identifier|scheme_id|value|number)"[[:space:]]*:[[:space:]]*"[^"]{1,40}"' /tmp/ti.out | sort -u | head -20
+                echo "Rôles dans l'exemple : $(grep -oE '<ram:(SellerTradeParty|BuyerTradeParty)>|"(seller|buyer)"' /tmp/ti.out | sort | uniq -c | tr '\n' ' ')"
+                head -c 1500 /tmp/ti.out | tr '\n' ' ' | sed 's/IBAN[^<]*//g'; echo
+                rm -f /tmp/ti.out
+              fi
               break
             fi
           done
