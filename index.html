@@ -1128,8 +1128,9 @@ function DocList({docs}){
 }
 function docDate(d, basis){ return basis==='event' ? (d.eventDate||d.issueDate||(d.createdAt||'').slice(0,10)) : (d.issueDate||d.eventDate||(d.createdAt||'').slice(0,10)); }
 function docHaystack(d){
-  const c=docClient(d)||{}; const t=computeTotals(d,docProfile(d));
-  return norm([d.number, clientName(c), c.keywords, c.city, d.eventLocation, d.eventType, d.notes, ...(d.lines||[]).flatMap(l=>[l.title,l.description]),
+  const c=docClient(d)||{}; const live=clientById(d.clientId)||{}; const t=computeTotals(d,docProfile(d));
+  // mots-clés et nom actuels de la fiche client (la facture numérotée garde une copie figée du client)
+  return norm([d.number, clientName(c), clientName(live), live.keywords, c.keywords, c.city, d.eventLocation, d.eventType, d.notes, ...(d.lines||[]).flatMap(l=>[l.title,l.description]),
     String(t.ttc).replace('.',','), String(Math.round(t.ttc)), docState(d).l].filter(Boolean).join(' '));
 }
 function periodPreset(k){
