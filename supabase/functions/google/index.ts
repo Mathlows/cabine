@@ -59,12 +59,43 @@ Deno.serve(async (req) => {
             for (const e of r.items || []) {
               if (e.status === "cancelled" || e.transparency === "transparent" && !e.start?.date) continue;
               out.push({ id: e.id, calendarId: id, summary: e.summary || "(sans titre)", location: e.location || "",
-                start: e.start?.dateTime || e.start?.date || "", end: e.end?.dateTime || e.end?.date || "", allDay: !!e.start?.date, link: e.htmlLink || "" });
+                start: e.start?.dateTime || e.start?.date || "", end: e.end?.dateTime || e.end?.date || "", allDay: !!e.start?.date, link: e.htmlLink || "", cabineId: e.extendedProperties?.private?.cabineId || "" });
             }
             pageToken = r.nextPageToken || "";
           } while (pageToken);
         }));
         return json({ items: out });
+      }
+
+      case "scan": {
+        // tous les événements des agendas modifiables, pour repérer les doublons (lecture seule)
+        const cals = await gfetch(token, `${CAL}/users/me/calendarList?minAccessRole=writer`);
+        const timeMin = new Date(Date.now() - 1000 * 3600 * 24 * 120).toISOString(), timeMax = new Date(Date.now() + 1000 * 3600 * 24 * 730).toISOString();
+        const out: any[] = [];
+        for (const c of (cals.items || []).slice(0, 15)) {
+          let pageToken = "";
+          do {
+            const q = new URLSearchParams({ timeMin, timeMax, singleEvents: "true", maxResults: "2500" });
+            if (pageToken) q.set("pageToken", pageToken);
+            const r = await gfetch(token, `${CAL}/calendars/${encodeURIComponent(c.id)}/events?${q}`).catch(() => ({ items: [] }));
+            for (const e of r.items || []) {
+              if (e.status === "cancelled") continue;
+              out.push({ id: e.id, calendarId: c.id, calName: c.summaryOverride || c.summary, summary: e.summary || "", location: e.location || "",
+                start: e.start?.dateTime || e.start?.date || "", allDay: !!e.start?.date, created: e.created || "", cabineId: e.extendedProperties?.private?.cabineId || "", recurring: !!e.recurringEventId });
+            }
+            pageToken = r.nextPageToken || "";
+          } while (pageToken);
+        }
+        return json({ items: out });
+      }
+
+      case "delete-many": {
+        const items = (Array.isArray(body.items) ? body.items : []).slice(0, 300);
+        let ok = 0;
+        for (const it of items) {
+          await gfetch(token, `${CAL}/calendars/${encodeURIComponent(it.calendarId)}/events/${encodeURIComponent(it.id)}`, { method: "DELETE" }).then(() => ok++).catch(() => {});
+        }
+        return json({ deleted: ok });
       }
 
       case "create-calendar": {
@@ -74,13 +105,25 @@ Deno.serve(async (req) => {
 
       case "upsert": {
         const g = toGoogle(body.event);
+        const ev = body.event;
+        // la date est dans un autre agenda (changement d'agenda) : on la déplace au lieu d'en créer une copie
+        if (ev.googleId && ev.googleCal && ev.googleCal !== (body.calendarId || "primary")) {
+          await gfetch(token, `${CAL}/calendars/${encodeURIComponent(ev.googleCal)}/events/${encodeURIComponent(ev.googleId)}/move?destination=${calId}`, { method: "POST" }).catch(() => {});
+        }
+        // pas d'identifiant connu : on cherche d'abord une date déjà créée par Cabine (autre appareil, essai précédent)
+        if (!ev.googleId) {
+          const q = new URLSearchParams({ privateExtendedProperty: `cabineId=${ev.id}`, showDeleted: "false", maxResults: "5" });
+          const found = await gfetch(token, `${CAL}/calendars/${calId}/events?${q}`).catch(() => ({ items: [] }));
+          const keep = (found.items || []).find((x: any) => x.status !== "cancelled");
+          if (keep) body.event.googleId = keep.id;
+        }
         const r = body.event.googleId
           ? await gfetch(token, `${CAL}/calendars/${calId}/events/${encodeURIComponent(body.event.googleId)}`, { method: "PATCH", body: JSON.stringify(g) }).catch(async (e) => {
               if (String(e.message).startsWith("google_404") || String(e.message).startsWith("google_410")) return gfetch(token, `${CAL}/calendars/${calId}/events`, { method: "POST", body: JSON.stringify(g) });
               throw e;
             })
           : await gfetch(token, `${CAL}/calendars/${calId}/events`, { method: "POST", body: JSON.stringify(g) });
-        return json({ googleId: r.id, updated: r.updated });
+        return json({ googleId: r.id, updated: r.updated, calendarId: body.calendarId || "primary" });
       }
 
       case "delete": {
