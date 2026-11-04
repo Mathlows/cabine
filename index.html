@@ -927,7 +927,7 @@ function Sheets(){
   const [stack,setStack]=useState([]);
   useEffect(()=>{ pushSheet = s => setStack(x=>[...x,s]); },[]);
   const close = key => setStack(x=>x.filter(s=>s.key!==key));
-  const C = {colorOne:ColorOne, dups:DuplicatesSheet, colors:ColorsSheet, yearDetail:YearDetail, send:SendSheet, booking:BookingView, bookingSettings:BookingSettings, client:ClientForm, product:ProductForm, profile:ProfileForm, doc:DocEditor, event:EventForm, confirm:Confirm, clientView:ClientView, picker:ProductPicker};
+  const C = {importOv:ImportOverlaySheet, colorOne:ColorOne, dups:DuplicatesSheet, colors:ColorsSheet, yearDetail:YearDetail, send:SendSheet, booking:BookingView, bookingSettings:BookingSettings, client:ClientForm, product:ProductForm, profile:ProfileForm, doc:DocEditor, event:EventForm, confirm:Confirm, clientView:ClientView, picker:ProductPicker};
   return stack.map(s=>{ const Comp=C[s.kind]; return html`<${Comp} key=${s.key} ...${s.props} onClose=${()=>close(s.key)} />`; });
 }
 
@@ -1483,14 +1483,17 @@ function EventList({events}){
 const evLabel = e => { const c=clientById(e.clientId); const name=c?clientName(c):(e.location||e.eventType||'Date DJ'); return (e.kind==='rdv'?'RDV ':'')+name; };
 /* ---------------- autres agendas Google (lecture seule, non enregistrés) ---------------- */
 const OV = {cals:null, cache:{}, loading:{}};
+const primaryId = () => (OV.cals||[]).find(c=>c.primary)?.id || 'primary';
+const realCal = id => id==='primary' ? primaryId() : id;
 function overlayIds(){
-  const st=settings(); if(!googleOn() && backend.mode!=='supabase') return [];
-  if(Array.isArray(st.overlayCals)) return st.overlayCals.filter(id=>id!==st.calendarId);
-  return st.calendarId==='primary' ? [] : ['primary'];
+  const st=settings(); if(backend.mode!=='supabase') return [];
+  const synced=realCal(st.calendarId||'');
+  const raw = Array.isArray(st.overlayCals) ? st.overlayCals : ['primary'];
+  return [...new Set(raw.map(realCal))].filter(id=>id && id!==synced);
 }
 async function overlayCalendars(){
   if(OV.cals) return OV.cals;
-  try{ OV.cals=(await gcall('calendars')).items||[]; }catch(e){ OV.cals=[]; }
+  try{ OV.cals=((await gcall('calendars')).items||[]).map(c=>c.primary?{...c, name:'Agenda principal'}:c); emit(); }catch(e){ OV.cals=[]; }
   return OV.cals;
 }
 /* Récupère les événements des autres agendas entre deux dates (AAAA-MM-JJ, incluses) ; résultat mis en cache 5 min. */
@@ -1501,9 +1504,11 @@ async function loadOverlay(from, to, force){
   if(OV.loading[key]) return OV.loading[key];
   OV.loading[key]=(async()=>{
     try{
-      const r=await gcall('overlay',{calendarIds:ids, timeMin:new Date(from+'T00:00:00').toISOString(), timeMax:new Date(addDays(to,1)+'T00:00:00').toISOString()});
+      await overlayCalendars();
+      const r=await gcall('overlay',{calendarIds:[...new Set(overlayIds())], timeMin:new Date(from+'T00:00:00').toISOString(), timeMax:new Date(addDays(to,1)+'T00:00:00').toISOString()});
       const cals=await overlayCalendars();
-      const items=(r.items||[]).map(e=>{ const cal=cals.find(x=>x.id===e.calendarId)||{}; const s=parisParts(e.start,e.allDay), en=parisParts(e.end,e.allDay);
+      const seenEv=new Set();
+      const items=(r.items||[]).filter(e=>{ const k=e.id; if(seenEv.has(k)) return false; seenEv.add(k); return true; }).map(e=>{ const cal=cals.find(x=>x.id===e.calendarId)||{}; const s=parisParts(e.start,e.allDay), en=parisParts(e.end,e.allDay);
         const last = e.allDay ? addDays(en.date,-1) : (en.time==='00:00' && en.date>s.date ? addDays(en.date,-1) : en.date);
         return {...e, calName:cal.name||'', color:cal.color||'', date:s.date, lastDate:last<s.date?s.date:last, startTime:e.allDay?'':s.time, endTime:e.allDay?'':en.time}; });
       OV.cache[key]={at:Date.now(), items}; emit(); return items;
@@ -1523,17 +1528,37 @@ function overlayByDate(items){
   Object.values(m).forEach(l=>l.sort((a,b)=>(a.startTime||'').localeCompare(b.startTime||'')));
   return m;
 }
+async function importOverlayEvent(o){
+  const c=matchClient(o.summary+' '+(o.location||''));
+  const ev={id:uid(), kind:/^rdv\b/i.test(o.summary)?'rdv':'presta', profileId:activeProfile()?.id||'', clientId:c?.id||'', date:o.date,
+    start:o.startTime||'20:00', end:o.endTime||'02:00', eventType:'', location:o.location||(c?lastLocationFor(c.id):o.summary)||'', notes:'',
+    googleId:o.id, googleCal:o.calendarId, fromGoogle:true, googleTitle:o.summary, googleLocation:o.location||'', invoiceId:''};
+  if(ev.kind==='presta'){ const inv=draftFromEvent(ev); ev.invoiceId=inv.id; await put('docs',inv); }
+  await put('events', ev);   // l'envoi vers Google déplace l'événement dans l'agenda synchronisé
+  OV.cache={};
+  return ev;
+}
+function ImportOverlaySheet({items, onClose}){
+  const [sel,setSel]=useState(()=>Object.fromEntries(items.map((o,i)=>[i,true]))); const [busy,setBusy]=useState(false);
+  const n=Object.values(sel).filter(Boolean).length;
+  async function go(){ setBusy(true); let k=0; for(const [i,o] of items.entries()) if(sel[i]){ await importOverlayEvent(o); k++; } toast(`${k} prestation${k>1?'s':''} ajoutée${k>1?'s':''} avec ${k>1?'leurs factures provisoires':'sa facture provisoire'}`); onClose(); }
+  return html`<${Sheet} title="Importer comme prestations" onClose=${onClose} actions=${html`<button class="btn pri sm" disabled=${busy||!n} onClick=${go}>${busy?'Import…':`Importer (${n})`}</button>`}>
+    <div class="small muted">Ces événements de vos autres agendas correspondent à vos clients. Chacun devient une prestation dans Cabine, avec sa facture provisoire, et il est <b>déplacé</b> dans votre agenda « DJ » (pas de copie, donc pas de doublon).</div>
+    <div class="list">${items.map((o,i)=>{ const c=matchClient(o.summary+' '+(o.location||'')); return html`<label class="item" style="cursor:pointer"><input type="checkbox" checked=${!!sel[i]} onChange=${e=>setSel(s=>({...s,[i]:e.target.checked}))} style="width:18px;height:18px;accent-color:var(--accent)"/>
+      <div class="grow"><div class="t">${o.summary} → ${c?clientName(c):'client à choisir'}</div><div class="tiny">${fdate(o.date)}${o.startTime?' · '+o.startTime:''} · ${o.calName||'Google'}</div></div></label>`; })}</div>
+  <//>`;
+}
 function OverlayList({items}){
   if(!items?.length) return null;
   return html`<div class="list">${items.map(e=>html`<a class="item" href=${e.link||'#'} target="_blank" rel="noopener" style="text-decoration:none;color:inherit">
     <span style=${`width:10px;height:10px;border-radius:50%;flex:none;background:${overlayColor(e)}`}></span>
     <div class="grow"><div class="t" style="font-weight:500">${e.summary}</div><div class="tiny">${e.allDay?'Toute la journée':`${e.startTime}–${e.endTime}`}${e.location?' · '+e.location:''}${e.calName?' · '+e.calName:''}</div></div>
-    <span class="tiny">Google</span></a>`)}</div>`;
+    <button class="btn sm" onClick=${async ev=>{ ev.preventDefault(); ev.stopPropagation(); const r=await importOverlayEvent(e); toast('Ajoutée comme prestation'); open('event',{event:S.events.find(x=>x.id===r.id)||r}); }}>Ajouter à Cabine</button></a>`)}</div>`;
 }
 function OverlaySettings(){
   useStore(); const st=settings(); const [cals,setCals]=useState(OV.cals);
   useEffect(()=>{ overlayCalendars().then(setCals); },[]);
-  const list=(cals||[]).filter(c=>c.id!==st.calendarId);
+  const list=(cals||[]).filter(c=>c.id!==realCal(st.calendarId||''));
   if(!cals) return html`<div class="tiny">Chargement de vos agendas…</div>`;
   if(!list.length) return null;
   const ids=overlayIds();
@@ -1582,6 +1607,7 @@ function AgendaView(){
         ${legendCals.map(c=>html`<button class="leg" onClick=${()=>open('colorOne',{kind:'cal', calId:c.id, name:c.name})} title="Changer la couleur"><i style=${`background:${(settings().colors?.cals||{})[c.id]||c.color||'#8a90a3'}`}></i>${c.name}</button>`)}
         <span class="muted" style="font-size:.7rem">Touchez une pastille pour changer sa couleur</span></div>
     </div>
+    ${(()=>{ const cand=Object.values(ovBy).flat().filter((o,i,a)=>a.findIndex(x=>x.id===o.id)===i && o.date>=addDays(todayISO(),-60) && matchClient(o.summary+' '+(o.location||''))); return cand.length ? html`<div class="notice small row sb"><span><b>${cand.length} événement${cand.length>1?'s':''}</b> de vos autres agendas ${cand.length>1?'ressemblent':'ressemble'} à des prestations pour vos clients (${[...new Set(cand.map(o=>o.summary))].slice(0,3).join(', ')}${cand.length>3?'…':''}).</span><button class="btn sm pri" onClick=${()=>open('importOv',{items:cand.sort((a,b)=>a.date.localeCompare(b.date))})}>Les importer</button></div>` : ''; })()}
     <div class="sect"><div class="lab" style="text-transform:none;letter-spacing:0;font-size:.95rem;color:var(--ink)">${fdateLong(sel)}</div>
       ${selEvents.length ? html`<${EventList} events=${selEvents}/>` : (ovBy[sel]?.length ? '' : html`<div class="muted small">Rien de prévu ce jour-là.</div>`)}
       ${ovBy[sel]?.length ? html`<div class="tiny" style="margin-top:2px">Dans vos autres agendas Google</div><${OverlayList} items=${ovBy[sel]}/>` : ''}</div>
