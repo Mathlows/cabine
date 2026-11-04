@@ -20,6 +20,9 @@ env:
   DB_PASSWORD_RAW: ${{ secrets.SUPABASE_DB_PASSWORD }}
   GOOGLE_CLIENT_ID: ${{ secrets.GOOGLE_CLIENT_ID }}
   GOOGLE_CLIENT_SECRET: ${{ secrets.GOOGLE_CLIENT_SECRET }}
+  SUPERPDP_CLIENT_ID: ${{ secrets.SUPERPDP_CLIENT_ID }}
+  SUPERPDP_CLIENT_SECRET: ${{ secrets.SUPERPDP_CLIENT_SECRET }}
+  SUPERPDP_API_URL: ${{ vars.SUPERPDP_API_URL }}
 
 jobs:
   backend:
@@ -48,10 +51,29 @@ jobs:
       - name: Clés Google pour les fonctions
         if: env.GOOGLE_CLIENT_ID != ''
         run: supabase secrets set --project-ref "$PROJECT_REF" --yes GOOGLE_CLIENT_ID="$GOOGLE_CLIENT_ID" GOOGLE_CLIENT_SECRET="$GOOGLE_CLIENT_SECRET"
+      - name: Clés de la plateforme agréée (SuperPDP)
+        if: env.SUPERPDP_CLIENT_ID != ''
+        run: |
+          supabase secrets set --project-ref "$PROJECT_REF" --yes SUPERPDP_CLIENT_ID="$SUPERPDP_CLIENT_ID" SUPERPDP_CLIENT_SECRET="$SUPERPDP_CLIENT_SECRET"
+          if [ -n "$SUPERPDP_API_URL" ]; then supabase secrets set --project-ref "$PROJECT_REF" --yes SUPERPDP_API_URL="$SUPERPDP_API_URL"; fi
+      - name: Tester la connexion à la plateforme (sans afficher de données)
+        if: env.SUPERPDP_CLIENT_ID != ''
+        run: |
+          CODE=$(curl -sS -o /tmp/tok.json -w "%{http_code}" -X POST https://api.superpdp.tech/oauth2/token -H "Content-Type: application/x-www-form-urlencoded" --data-urlencode grant_type=client_credentials --data-urlencode "client_id=$SUPERPDP_CLIENT_ID" --data-urlencode "client_secret=$SUPERPDP_CLIENT_SECRET")
+          echo "Connexion SuperPDP : HTTP $CODE"
+          if [ "$CODE" = "200" ]; then
+            TOK=$(jq -r .access_token /tmp/tok.json); echo "::add-mask::$TOK"
+            ME=$(curl -sS -o /dev/null -w "%{http_code}" "${SUPERPDP_API_URL:-https://api.superpdp.tech/v1.beta}/companies/me" -H "Authorization: Bearer $TOK")
+            echo "Accès au compte entreprise : HTTP $ME"
+          else
+            echo "::warning::Identifiants SuperPDP refusés (HTTP $CODE)"
+          fi
+          rm -f /tmp/tok.json
       - name: Déployer les fonctions
         run: |
           supabase functions deploy google --project-ref "$PROJECT_REF" --yes
           supabase functions deploy booking --project-ref "$PROJECT_REF" --no-verify-jwt --yes
+          supabase functions deploy pa --project-ref "$PROJECT_REF" --yes
       - name: Connexion avec Google (réglages d'authentification)
         if: env.GOOGLE_CLIENT_ID != ''
         run: |

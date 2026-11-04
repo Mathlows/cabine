@@ -5,3 +5,6 @@ verify_jwt = true
 
 [functions.booking]
 verify_jwt = false
+
+[functions.pa]
+verify_jwt = true
