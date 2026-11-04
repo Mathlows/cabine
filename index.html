@@ -961,20 +961,21 @@ async function enablePush(){
 }
 async function disablePush(){ const sub=await currentPushSub(); if(sub){ await sb.from('push_subscriptions').delete().eq('endpoint', sub.endpoint); await sub.unsubscribe(); } }
 function RemindersCard(){
-  useStore(); const r=remDefaults(); const [state,setState]=useState({loading:true}); const [busy,setBusy]=useState(false);
+  useStore(); const r=remDefaults(); const [state,setState]=useState({loading:true}); const [busy,setBusy]=useState(false); const [diag,setDiag]=useState('');
   const refresh=async()=>{ if(!pushSupported()){ setState({unsupported:true}); return; } const sub=await currentPushSub(); setState({perm:Notification.permission, on:!!sub && Notification.permission==='granted'}); };
   useEffect(()=>{ refresh(); },[]);
   const sel=(value,onChange,withNone)=>html`<select class="inp" value=${value===null||value===undefined?'none':String(value)} onChange=${e=>onChange(e.target.value==='none'?null:Number(e.target.value))}>${withNone?html`<option value="none">Aucun rappel</option>`:''}${REM_CHOICES.map(([m,l])=>html`<option value=${m}>${l}</option>`)}</select>`;
   return html`<div class="card stack"><h2>Rappels</h2>
     ${state.unsupported ? html`<div class="small muted">Ce navigateur ne permet pas les notifications. Sur votre téléphone, installez Cabine (menu ⋮ de Chrome → Installer l’application) puis revenez ici.</div>`
       : html`<div class="row sb"><span class="small">${state.loading?'Vérification…': state.on ? html`<span style="color:var(--ok)">✓ Notifications activées sur cet appareil</span>` : state.perm==='denied' ? html`<span style="color:var(--bad)">Notifications bloquées sur cet appareil</span>` : 'Notifications désactivées sur cet appareil'}</span>
-        ${state.on ? html`<span class="row" style="gap:6px"><button class="btn sm" disabled=${busy} onClick=${async()=>{ setBusy(true); try{ const r=await pushInvoke('test'); toast(r.sent?'Notification de test envoyée':'Aucun appareil n’a reçu le test'); }catch(e){ toast(e.message); } setBusy(false); }}>Tester</button><button class="btn ghost sm" onClick=${async()=>{ await disablePush(); refresh(); toast('Notifications désactivées sur cet appareil'); }}>Désactiver</button></span>`
+        ${state.on ? html`<span class="row" style="gap:6px"><button class="btn sm" disabled=${busy} onClick=${async()=>{ setBusy(true); try{ const r=await pushInvoke('test'); setDiag(`Appareils enregistrés : ${r.subs} · envois acceptés : ${r.sent}${(r.errors||[]).length?' · '+r.errors.join(' | '):''}`); toast(r.sent?'Notification de test envoyée : elle doit arriver dans quelques secondes':'La notification n’a pas pu partir (détail sous la carte)'); }catch(e){ setDiag('Erreur : '+e.message); toast(e.message); } setBusy(false); }}>Tester</button><button class="btn ghost sm" onClick=${async()=>{ await disablePush(); refresh(); toast('Notifications désactivées sur cet appareil'); }}>Désactiver</button></span>`
           : html`<button class="btn pri sm" disabled=${busy || state.perm==='denied'} onClick=${async()=>{ setBusy(true); try{ await enablePush(); toast('Notifications activées'); }catch(e){ toast(e.message); } setBusy(false); refresh(); }}>Activer sur cet appareil</button>`}</div>
         ${state.perm==='denied' && html`<div class="tiny">Pour les débloquer : appui long sur l’icône de Cabine → Infos sur l’appli → Notifications, ou dans Chrome : ⋮ → Paramètres → Paramètres des sites → Notifications.</div>`}`}
     <div class="fields">
       <label class="f">Rendez-vous clients${sel(r.rdv, v=>saveSettings({reminders:{...r, rdv:v}}), true)}</label>
       <label class="f">Prestations DJ${sel(r.presta, v=>saveSettings({reminders:{...r, presta:v}}), true)}</label>
     </div>
+    ${diag && html`<div class="notice small" style="word-break:break-word">${diag}</div>`}
     <div class="tiny">Délai par défaut ; chaque date peut avoir le sien (fiche de la date → Rappel). La notification part du serveur, même quand Cabine est fermée ; la toucher ouvre la fiche de la date. Activez les notifications sur chaque appareil où vous voulez les recevoir.</div>
   </div>`;
 }
@@ -2348,7 +2349,7 @@ function App(){
 }
 if(window.CABINE_CONFIG && 'serviceWorker' in navigator && !/claude\.ai|claudeusercontent/.test(location.hostname)){
   const l=document.createElement('link'); l.rel='manifest'; l.href='manifest.webmanifest'; document.head.appendChild(l);
-  navigator.serviceWorker.register('sw.js').catch(()=>{});
+  navigator.serviceWorker.register('sw.js').then(reg=>reg.update().catch(()=>{})).catch(()=>{});
 }
 /* Application installée : à l'ouverture et au retour sur l'appli, vérifier qu'on a bien la dernière version publiée. */
 async function checkUpdate(){

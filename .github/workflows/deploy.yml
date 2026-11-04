@@ -133,6 +133,9 @@ jobs:
           echo "$R" | grep -q '"ok":true' || echo "::warning::La fonction des rappels n'a pas répondu correctement"
           J=$(curl -sS -m 30 "https://api.supabase.com/v1/projects/$PROJECT_REF/database/query" -H "Authorization: Bearer $SUPABASE_ACCESS_TOKEN" -H "Content-Type: application/json" -d '{"query":"select jobname, schedule, active from cron.job where jobname = '"'"'cabine-rappels'"'"'"}' || true)
           echo "Planification : $J"
+          Q='{"query":"select count(*) as appareils, count(distinct split_part(endpoint, '"'"'/'"'"', 3)) as services, (select count(*) from public.reminders_sent) as rappels_envoyes from public.push_subscriptions"}'
+          D=$(curl -sS -m 30 "https://api.supabase.com/v1/projects/$PROJECT_REF/database/query" -H "Authorization: Bearer $SUPABASE_ACCESS_TOKEN" -H "Content-Type: application/json" -d "$Q" || true)
+          echo "Appareils enregistrés pour les notifications : $D"
       - name: Connexion avec Google (réglages d'authentification)
         if: env.GOOGLE_CLIENT_ID != ''
         run: |

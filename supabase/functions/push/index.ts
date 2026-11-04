@@ -11,8 +11,9 @@ Deno.serve(async (req) => {
     const body = await req.json().catch(() => ({}));
     if (body.action === "key") return json({ publicKey: vapidPublicKey });
     if (body.action === "test") {
-      const n = await pushToUser(user.id, { title: "Cabine", body: "Les rappels fonctionnent sur cet appareil.", url: "#agenda", tag: "test" });
-      return json({ sent: n });
+      const report = { subs: 0, sent: 0, errors: [] as string[] };
+      await pushToUser(user.id, { title: "Cabine", body: "Les rappels fonctionnent sur cet appareil.", url: "#agenda", tag: "test" }, report);
+      return json(report);
     }
     return json({ error: "action_inconnue" }, 400);
   } catch (e) {
