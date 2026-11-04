@@ -8,3 +8,9 @@ verify_jwt = false
 
 [functions.pa]
 verify_jwt = true
+
+[functions.reminders]
+verify_jwt = false
+
+[functions.push]
+verify_jwt = true

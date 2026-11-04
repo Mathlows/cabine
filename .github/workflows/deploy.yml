@@ -105,11 +105,34 @@ jobs:
             fi
           done
           rm -f /tmp/a.json /tmp/b.json /tmp/me.json
+      - name: Clés des notifications (créées une seule fois)
+        run: |
+          SITE="https://${GITHUB_REPOSITORY_OWNER,,}.github.io/${GITHUB_REPOSITORY#*/}/"
+          if ! supabase secrets list --project-ref "$PROJECT_REF" 2>/dev/null | grep -q VAPID_PRIVATE_KEY; then
+            KEYS=$(npx -y web-push@3.6.7 generate-vapid-keys --json)
+            PUB=$(echo "$KEYS" | jq -r .publicKey); PRIV=$(echo "$KEYS" | jq -r .privateKey)
+            echo "::add-mask::$PRIV"
+            supabase secrets set --project-ref "$PROJECT_REF" --yes VAPID_PUBLIC_KEY="$PUB" VAPID_PRIVATE_KEY="$PRIV"
+            echo "Clés de notification créées"
+          else
+            echo "Clés de notification déjà présentes"
+          fi
+          supabase secrets set --project-ref "$PROJECT_REF" --yes VAPID_SUBJECT="$SITE"
       - name: Déployer les fonctions
         run: |
           supabase functions deploy google --project-ref "$PROJECT_REF" --yes
           supabase functions deploy booking --project-ref "$PROJECT_REF" --no-verify-jwt --yes
           supabase functions deploy pa --project-ref "$PROJECT_REF" --yes
+          supabase functions deploy push --project-ref "$PROJECT_REF" --yes
+          supabase functions deploy reminders --project-ref "$PROJECT_REF" --no-verify-jwt --yes
+      - name: Tester la fonction des rappels
+        run: |
+          sleep 5
+          R=$(curl -sS -m 60 -X POST "https://$PROJECT_REF.supabase.co/functions/v1/reminders" -H "Content-Type: application/json" -d '{}')
+          echo "Réponse de la fonction des rappels : $R"
+          echo "$R" | grep -q '"ok":true' || echo "::warning::La fonction des rappels n'a pas répondu correctement"
+          J=$(curl -sS -m 30 "https://api.supabase.com/v1/projects/$PROJECT_REF/database/query" -H "Authorization: Bearer $SUPABASE_ACCESS_TOKEN" -H "Content-Type: application/json" -d '{"query":"select jobname, schedule, active from cron.job where jobname = '"'"'cabine-rappels'"'"'"}' || true)
+          echo "Planification : $J"
       - name: Connexion avec Google (réglages d'authentification)
         if: env.GOOGLE_CLIENT_ID != ''
         run: |
