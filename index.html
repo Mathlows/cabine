@@ -590,7 +590,9 @@ const FONTS = {ready:false, reg:'', bold:''};
 async function ensureFonts(){
   if(FONTS.ready) return true;
   try{
-    const b64 = async u => { const r=await fetch(u); if(!r.ok) throw new Error(u); const buf=new Uint8Array(await r.arrayBuffer()); let s=''; for(let i=0;i<buf.length;i+=0x8000) s+=String.fromCharCode.apply(null, buf.subarray(i,i+0x8000)); return btoa(s); };
+    const b64 = async u => { const r=await fetch(u); if(!r.ok) throw new Error(u); const buf=new Uint8Array(await r.arrayBuffer());
+      // une police TrueType commence par 00 01 00 00 (ou « true ») : sinon ce n'est pas une police
+      if(!(buf.length>1000 && ((buf[0]===0&&buf[1]===1&&buf[2]===0&&buf[3]===0) || String.fromCharCode(buf[0],buf[1],buf[2],buf[3])==='true'))) throw new Error('police invalide'); let s=''; for(let i=0;i<buf.length;i+=0x8000) s+=String.fromCharCode.apply(null, buf.subarray(i,i+0x8000)); return btoa(s); };
     [FONTS.reg, FONTS.bold] = await Promise.all([b64('fonts/Inter-Regular.ttf'), b64('fonts/Inter-Bold.ttf')]);
     FONTS.ready=true;
   }catch(e){ FONTS.ready=false; }
@@ -598,9 +600,12 @@ async function ensureFonts(){
 }
 function useFonts(pdf){
   if(!FONTS.ready) return 'helvetica';
-  pdf.addFileToVFS('Inter-Regular.ttf', FONTS.reg); pdf.addFont('Inter-Regular.ttf','Inter','normal');
-  pdf.addFileToVFS('Inter-Bold.ttf', FONTS.bold); pdf.addFont('Inter-Bold.ttf','Inter','bold');
-  return 'Inter';
+  try{
+    pdf.addFileToVFS('Inter-Regular.ttf', FONTS.reg); pdf.addFont('Inter-Regular.ttf','Inter','normal');
+    pdf.addFileToVFS('Inter-Bold.ttf', FONTS.bold); pdf.addFont('Inter-Bold.ttf','Inter','bold');
+    pdf.setFont('Inter','normal'); pdf.setFont('Inter','bold');
+    return 'Inter';
+  }catch(e){ FONTS.ready=false; return 'helvetica'; }
 }
 const xe = s => String(s??'').replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;');
 const d102 = s => (s||'').replace(/-/g,'');
