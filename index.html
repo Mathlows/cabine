@@ -1126,19 +1126,65 @@ function DocList({docs}){
     <div class="grow"><div class="t">${clientName(docClient(d))}</div><div class="tiny">${d.number || (d.type==='facture'?'Facture':'Devis')+' brouillon'}${d.eventDate?' · prestation le '+fdate(d.eventDate):''}${d.eventType?' · '+d.eventType:''}</div></div>
     <div style="text-align:right;display:flex;flex-direction:column;gap:3px;align-items:flex-end"><span class="amt">${eur(t.ttc)}</span><span class=${'pill '+st.k}>${st.l}</span>${d.pa?.id ? html`<span class=${'pill '+paTone(d.pa.status)}>⇄ ${paLabel(d.pa.status)}${d.pa.sandbox?' (test)':''}</span>`:''}</div></button>`; })}</div>`;
 }
+function docDate(d, basis){ return basis==='event' ? (d.eventDate||d.issueDate||(d.createdAt||'').slice(0,10)) : (d.issueDate||d.eventDate||(d.createdAt||'').slice(0,10)); }
+function docHaystack(d){
+  const c=docClient(d)||{}; const t=computeTotals(d,docProfile(d));
+  return norm([d.number, clientName(c), c.keywords, c.city, d.eventLocation, d.eventType, d.notes, ...(d.lines||[]).flatMap(l=>[l.title,l.description]),
+    String(t.ttc).replace('.',','), String(Math.round(t.ttc)), docState(d).l].filter(Boolean).join(' '));
+}
+function periodPreset(k){
+  const t=todayISO(), y=+t.slice(0,4), m=+t.slice(5,7);
+  const pad=n=>String(n).padStart(2,'0'), last=(yy,mm)=>new Date(yy,mm,0).getDate();
+  if(k==='month') return [`${y}-${pad(m)}-01`, `${y}-${pad(m)}-${last(y,m)}`];
+  if(k==='prev'){ const yy=m===1?y-1:y, mm=m===1?12:m-1; return [`${yy}-${pad(mm)}-01`, `${yy}-${pad(mm)}-${last(yy,mm)}`]; }
+  if(k==='quarter'){ const q=Math.floor((m-1)/3)*3+1; return [`${y}-${pad(q)}-01`, `${y}-${pad(q+2)}-${last(y,q+2)}`]; }
+  if(k==='year') return [`${y}-01-01`, `${y}-12-31`];
+  if(k==='lastyear') return [`${y-1}-01-01`, `${y-1}-12-31`];
+  return ['',''];
+}
 function DocsView(){
-  useStore(); const [type,setType]=useState(lsGet('cabine-doctype')||'facture'); const [filter,setFilter]=useState('all');
+  useStore();
+  const saved=(()=>{ try{ return JSON.parse(lsGet('cabine-docfilters')||'{}'); }catch(e){ return {}; } })();
+  const [type,setType]=useState(lsGet('cabine-doctype')||'facture'); const [filter,setFilter]=useState('all');
+  const [q,setQ]=useState(''); const [from,setFrom]=useState(saved.from||''); const [to,setTo]=useState(saved.to||''); const [basis,setBasis]=useState(saved.basis||'issue');
+  const [limit,setLimit]=useState(60);
+  useEffect(()=>{ lsSet('cabine-docfilters', JSON.stringify({from,to,basis})); setLimit(60); },[from,to,basis,q,filter,type]);
   const p=activeProfile();
   const all = S.docs.filter(d=>d.type===type && (!p || d.profileId===p.id || !d.profileId));
-  const list = all.filter(d=>filter==='all' || docState(d).k===filter || (filter==='due'&&docState(d).k==='late')).sort((a,b)=>((b.issueDate||b.eventDate||b.createdAt) > (a.issueDate||a.eventDate||a.createdAt) ? 1:-1));
+  const words = norm(q).split(' ').filter(Boolean);
+  const list = all.filter(d=>{
+    if(filter!=='all' && !(docState(d).k===filter || (filter==='due'&&docState(d).k==='late'))) return false;
+    const dd=docDate(d,basis); if(from && (!dd || dd<from)) return false; if(to && (!dd || dd>to)) return false;
+    if(words.length){ const h=docHaystack(d); if(!words.every(w=>h.includes(w))) return false; }
+    return true;
+  }).sort((a,b)=>(docDate(b,basis)||'').localeCompare(docDate(a,basis)||'') || (b.number||'').localeCompare(a.number||''));
+  const counted = list.filter(d=>d.status!=='annulee');
+  const sum = counted.reduce((a,d)=>{ const t=computeTotals(d,docProfile(d)); return {ht:a.ht+t.ht, ttc:a.ttc+t.ttc}; },{ht:0,ttc:0});
   const filters = type==='facture' ? [['all','Toutes'],['draft','Brouillons'],['due','À encaisser'],['paid','Payées']] : [['all','Tous'],['draft','Brouillons'],['due','Envoyés'],['accepted','Acceptés']];
+  const presets=[['month','Ce mois'],['prev','Mois dernier'],['quarter','Ce trimestre'],['year','Cette année'],['lastyear','Année dernière']];
+  const active = presets.find(([k])=>{ const [a,b]=periodPreset(k); return a===from && b===to; })?.[0] || (from||to?'custom':'all');
+  const filtered = !!(q || from || to || filter!=='all');
+  const anyVat = counted.some(d=>computeTotals(d,docProfile(d)).tva);
   return html`<div class="wrap">
     <div class="row sb"><h1>${type==='facture'?'Factures':'Devis'}</h1><button class="btn pri" onClick=${()=>open('doc',{doc:newDoc(type), isNew:true})}>${type==='facture'?'Nouvelle facture':'Nouveau devis'}</button></div>
     <div class="row sb">
       <div class="seg">${[['facture','Factures'],['devis','Devis']].map(([k,l])=>html`<button class=${type===k?'on':''} onClick=${()=>{ setType(k); setFilter('all'); lsSet('cabine-doctype',k); }}>${l}</button>`)}</div>
       <div class="seg">${filters.map(([k,l])=>html`<button class=${filter===k?'on':''} onClick=${()=>setFilter(k)}>${l}</button>`)}</div>
     </div>
-    ${list.length ? html`<${DocList} docs=${list}/>` : html`<div class="card empty"><h3>Rien ici pour l’instant</h3><p>${type==='facture'?'Les dates ajoutées dans l’agenda créent automatiquement une facture brouillon.':'Créez un devis, puis transformez-le en facture quand il est accepté.'}</p></div>`}
+    <div class="card stack" style="padding:12px">
+      <div class="row" style="flex-wrap:nowrap"><input class="inp" id="doc-q" type="search" placeholder="Rechercher : client, numéro, lieu, montant…" value=${q} onInput=${e=>setQ(e.target.value)}/>${q && html`<button class="btn ghost sm" onClick=${()=>setQ('')}>Effacer</button>`}</div>
+      <div class="row" style="gap:6px">${[['all','Toutes les dates'],...presets].map(([k,l])=>html`<button class=${'btn sm'+(active===k?' pri':'')} onClick=${()=>{ const [a,b]=periodPreset(k); setFrom(a); setTo(b); }}>${l}</button>`)}</div>
+      <div class="row" style="align-items:flex-end">
+        <label class="f" style="flex:1;min-width:130px">Du<input type="date" value=${from} onInput=${e=>setFrom(e.target.value)}/></label>
+        <label class="f" style="flex:1;min-width:130px">Au<input type="date" value=${to} onInput=${e=>setTo(e.target.value)}/></label>
+        <label class="f" style="flex:1;min-width:160px">Selon<select value=${basis} onChange=${e=>setBasis(e.target.value)}><option value="issue">la date de ${type==='facture'?'facture':'devis'}</option><option value="event">la date de prestation</option></select></label>
+      </div>
+      ${from && to && from>to && html`<div class="small" style="color:var(--bad)">La date de début est après la date de fin.</div>`}
+    </div>
+    ${filtered && html`<div class="row sb small"><span><b>${list.length}</b> ${type==='facture'?(list.length>1?'factures trouvées':'facture trouvée'):(list.length>1?'devis trouvés':'devis trouvé')}${list.length!==counted.length?` (dont ${list.length-counted.length} ${list.length-counted.length>1?'annulés, non comptés':'annulé, non compté'})`.replace(/annulé/g, type==='facture'?'annulée':'annulé').replace(/compté/g, type==='facture'?'comptée':'compté'):''}</span><span>Total : <b>${eur(anyVat?sum.ht:sum.ttc)}</b>${anyVat?html` HT · ${eur(sum.ttc)} TTC`:''}</span></div>`}
+    ${list.length ? html`<${DocList} docs=${list.slice(0,limit)}/>${list.length>limit && html`<button class="btn" style="align-self:center" onClick=${()=>setLimit(l=>l+100)}>Afficher plus (${list.length-limit} restant${list.length-limit>1?'s':''})</button>`}`
+      : filtered ? html`<div class="card empty"><h3>Aucun résultat</h3><p>Essayez un autre mot ou une autre période.</p><button class="btn" onClick=${()=>{ setQ(''); setFrom(''); setTo(''); setFilter('all'); }}>Tout afficher</button></div>`
+      : html`<div class="card empty"><h3>Rien ici pour l’instant</h3><p>${type==='facture'?'Les dates ajoutées dans l’agenda créent automatiquement une facture brouillon.':'Créez un devis, puis transformez-le en facture quand il est accepté.'}</p></div>`}
   </div>`;
 }
 function ClientPicker({value, onChange}){
