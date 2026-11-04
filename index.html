@@ -1302,6 +1302,7 @@ function EventForm({event, preset, onClose}){
     const inv = S.docs.find(x=>x.id===o.invoiceId);
     if(inv && inv.status==='brouillon' && event){ await put('docs',{...inv, eventDate:o.date, eventType:o.eventType, eventLocation:o.location, clientId: inv.clientId||o.clientId}); }
     await put('events', o);
+    if(o.fromGoogle) OV.cache={};
     toast(isPresta && mk && !event ? 'Date ajoutée, facture brouillon créée' : 'Date enregistrée'); onClose();
   }
   const linked = S.docs.find(x=>x.id===f.invoiceId);
@@ -1309,6 +1310,7 @@ function EventForm({event, preset, onClose}){
   useEffect(()=>{ let alive=true; if(f.date) loadOverlay(f.date,f.date).then(x=>{ if(alive) setBusy((overlayByDate(x)[f.date])||[]); }); return ()=>{ alive=false; }; },[f.date]);
   const sameDay = S.events.filter(e=>e.date===f.date && e.id!==f.id);
   return html`<${Sheet} title=${event?'Modifier la date':'Nouvelle date'} onClose=${onClose} actions=${html`<button class="btn pri sm" onClick=${save}>Enregistrer</button>`}>
+    ${!event && f.fromGoogle && html`<div class="notice small">Événement de votre agenda Google${f.googleCalName?' « '+f.googleCalName+' »':''} : <b>${f.googleTitle}</b>. Touchez <b>Enregistrer</b> pour l’ajouter à Cabine${f.kind==='presta'?' avec sa facture provisoire':''} ; il sera déplacé dans votre agenda « DJ ». Si c’est un événement personnel, fermez simplement.${f.googleLink?html` <a href=${f.googleLink} target="_blank" rel="noopener">Voir dans Google Agenda</a>`:''}</div>`}
     <div class="seg">${[['presta','Prestation DJ'],['rdv','Rendez-vous client']].map(([k,l])=>html`<button class=${f.kind===k?'on':''} onClick=${()=>setF(x=>({...x,kind:k}))}>${l}</button>`)}</div>
     <${ClientPicker} value=${f.clientId} onChange=${v=>setF(x=>({...x,clientId:v}))}/>
     <div class="fields">
@@ -1528,6 +1530,13 @@ function overlayByDate(items){
   Object.values(m).forEach(l=>l.sort((a,b)=>(a.startTime||'').localeCompare(b.startTime||'')));
   return m;
 }
+function overlayPreset(o){
+  const c=matchClient(o.summary+' '+(o.location||''));
+  return {kind:/^rdv\b/i.test(o.summary)?'rdv':'presta', profileId:activeProfile()?.id||'', clientId:c?.id||'', date:o.date,
+    start:o.startTime||'20:00', end:o.endTime||'02:00', eventType:'', location:o.location||(c?lastLocationFor(c.id):'')||'', notes:'',
+    googleId:o.id, googleCal:o.calendarId, fromGoogle:true, googleTitle:o.summary, googleLocation:o.location||'', googleLink:o.link||'', googleCalName:o.calName||'', invoiceId:''};
+}
+function openOverlay(o){ open('event', {preset:overlayPreset(o)}); }
 async function importOverlayEvent(o){
   const c=matchClient(o.summary+' '+(o.location||''));
   const ev={id:uid(), kind:/^rdv\b/i.test(o.summary)?'rdv':'presta', profileId:activeProfile()?.id||'', clientId:c?.id||'', date:o.date,
@@ -1550,10 +1559,10 @@ function ImportOverlaySheet({items, onClose}){
 }
 function OverlayList({items}){
   if(!items?.length) return null;
-  return html`<div class="list">${items.map(e=>html`<a class="item" href=${e.link||'#'} target="_blank" rel="noopener" style="text-decoration:none;color:inherit">
+  return html`<div class="list">${items.map(e=>html`<button class="item" onClick=${()=>openOverlay(e)}>
     <span style=${`width:10px;height:10px;border-radius:50%;flex:none;background:${overlayColor(e)}`}></span>
     <div class="grow"><div class="t" style="font-weight:500">${e.summary}</div><div class="tiny">${e.allDay?'Toute la journée':`${e.startTime}–${e.endTime}`}${e.location?' · '+e.location:''}${e.calName?' · '+e.calName:''}</div></div>
-    <button class="btn sm" onClick=${async ev=>{ ev.preventDefault(); ev.stopPropagation(); const r=await importOverlayEvent(e); toast('Ajoutée comme prestation'); open('event',{event:S.events.find(x=>x.id===r.id)||r}); }}>Ajouter à Cabine</button></a>`)}</div>`;
+    <span class="tiny">${matchClient(e.summary+' '+(e.location||''))?'Prestation ?':'Google'}</span></button>`)}</div>`;
 }
 function OverlaySettings(){
   useStore(); const st=settings(); const [cals,setCals]=useState(OV.cals);
@@ -1597,7 +1606,7 @@ function AgendaView(){
             <span class="num">${d.getDate()}</span>
             ${shown.map(x=>x.t==='c'
               ? html`<button class="ev" style=${`--c:${eventColor(x.e)}`} title=${eventSummary(x.e)} onClick=${ev=>{ ev.stopPropagation(); open('event',{event:x.e}); }}>${evLabel(x.e)}</button>`
-              : html`<a class="ev ext" style=${`--c:${overlayColor(x.e)}`} title=${x.e.summary+(x.e.calName?' ('+x.e.calName+')':'')} href=${x.e.link||'#'} target="_blank" rel="noopener" onClick=${ev=>{ ev.stopPropagation(); if(!x.e.link) ev.preventDefault(); }}>${x.e.summary}</a>`)}
+              : html`<button class="ev ext" style=${`--c:${overlayColor(x.e)}`} title=${x.e.summary+(x.e.calName?' ('+x.e.calName+')':'')} onClick=${ev=>{ ev.stopPropagation(); openOverlay(x.e); }}>${x.e.summary}</button>`)}
             ${all.length>shown.length && html`<span class="more">+${all.length-shown.length}</span>`}
           </div>`; })}
       </div>
