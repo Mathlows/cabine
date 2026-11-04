@@ -634,6 +634,8 @@ function ciiXml(d, opts={}){
   const franchise=!t.tva, ent=c.kind==='entreprise';
   const cat = r => franchise ? 'E' : (Number(r)>0 ? 'S' : 'Z');
   const sellerSiren=sirenOf(p), buyerSiren=ent?sirenOf(c):'';
+  // adresses de réception (annuaire) : le SIREN par défaut, ou une adresse précise (bac à sable, code de routage)
+  const sellerEndpoint=opts.sellerEndpoint||sellerSiren, buyerEndpoint=ent?(opts.buyerEndpoint||c.paEndpoint||buyerSiren):'';
   const lines=(d.lines||[]).map((l,i)=>{
     const gross=r2((Number(l.qty)||0)*(Number(l.unit)||0)), net=lineTotal(l), disc=r2(gross-net), rate=franchise?0:(Number(l.vat)||0);
     return `<ram:IncludedSupplyChainTradeLineItem>
@@ -689,14 +691,14 @@ ${lines}
 ${sellerSiren?`<ram:SpecifiedLegalOrganization><ram:ID schemeID="0002">${sellerSiren}</ram:ID>${p.tradeName&&p.ownerName?`<ram:TradingBusinessName>${xe(p.tradeName)}</ram:TradingBusinessName>`:''}</ram:SpecifiedLegalOrganization>`:''}
 ${(p.ownerName||p.phone||p.email)?`<ram:DefinedTradeContact>${p.ownerName?`<ram:PersonName>${xe(p.ownerName)}</ram:PersonName>`:''}${p.phone?`<ram:TelephoneUniversalCommunication><ram:CompleteNumber>${xe(p.phone)}</ram:CompleteNumber></ram:TelephoneUniversalCommunication>`:''}${p.email?`<ram:EmailURIUniversalCommunication><ram:URIID>${xe(p.email)}</ram:URIID></ram:EmailURIUniversalCommunication>`:''}</ram:DefinedTradeContact>`:''}
 ${addr(p,country(p))}
-${sellerSiren?`<ram:URIUniversalCommunication><ram:URIID schemeID="0225">${sellerSiren}</ram:URIID></ram:URIUniversalCommunication>`:''}
+${sellerEndpoint?`<ram:URIUniversalCommunication><ram:URIID schemeID="0225">${xe(sellerEndpoint)}</ram:URIID></ram:URIUniversalCommunication>`:''}
 ${p.tvaNumber?`<ram:SpecifiedTaxRegistration><ram:ID schemeID="VA">${xe(p.tvaNumber.replace(/\s/g,''))}</ram:ID></ram:SpecifiedTaxRegistration>`:''}
 </ram:SellerTradeParty>
 <ram:BuyerTradeParty>
 <ram:Name>${xe(clientName(c))}</ram:Name>
 ${buyerSiren?`<ram:SpecifiedLegalOrganization><ram:ID schemeID="0002">${buyerSiren}</ram:ID></ram:SpecifiedLegalOrganization>`:''}
 ${addr(c,country(c))}
-${buyerSiren?`<ram:URIUniversalCommunication><ram:URIID schemeID="0225">${buyerSiren}</ram:URIID></ram:URIUniversalCommunication>`:(c.email?`<ram:URIUniversalCommunication><ram:URIID schemeID="EM">${xe(c.email)}</ram:URIID></ram:URIUniversalCommunication>`:'')}
+${buyerEndpoint?`<ram:URIUniversalCommunication><ram:URIID schemeID="0225">${xe(buyerEndpoint)}</ram:URIID></ram:URIUniversalCommunication>`:(c.email?`<ram:URIUniversalCommunication><ram:URIID schemeID="EM">${xe(c.email)}</ram:URIID></ram:URIUniversalCommunication>`:'')}
 ${ent&&c.tva?`<ram:SpecifiedTaxRegistration><ram:ID schemeID="VA">${xe(c.tva.replace(/\s/g,''))}</ram:ID></ram:SpecifiedTaxRegistration>`:''}
 </ram:BuyerTradeParty>
 </ram:ApplicableHeaderTradeAgreement>
@@ -803,7 +805,10 @@ async function sendToPA(d, silent){
     const env = await paEnvironment();
     // bac à sable : la plateforme n'accepte que l'entreprise fictive du compte de test
     // bac à sable : vendeur = entreprise fictive du compte, client = entreprise fictive de test (000000001)
-    const opts = env.sandbox && env.siren ? {sellerSiren:env.siren, buyerSiren: env.siren==='000000001' ? '000000002' : '000000001'} : {};
+    // adresses de réception des entreprises fictives, d'après l'exemple fourni par SuperPDP
+    const SANDBOX = {'000000002':'315143296_119041', '000000001':'315143296_119040'};
+    const other = env.siren==='000000001' ? '000000002' : '000000001';
+    const opts = env.sandbox && env.siren ? {sellerSiren:env.siren, sellerEndpoint:SANDBOX[env.siren]||env.siren, buyerSiren:other, buyerEndpoint:SANDBOX[other]} : {};
     const b64 = by => { let bin=''; for(let i=0;i<by.length;i+=0x8000) bin+=String.fromCharCode.apply(null, by.subarray(i,i+0x8000)); return btoa(bin); };
     const ext = env.sandbox ? cur.number+'-TEST-'+Date.now().toString(36) : cur.number;
     const client = clientById(cur.clientId);
