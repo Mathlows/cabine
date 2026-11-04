@@ -627,8 +627,9 @@ function facturxIssues(d){
   if(!(c.cp && c.city) && c.kind==='entreprise') out.push('L’adresse du client est incomplète.');
   return out;
 }
-function ciiXml(d){
-  const p=docProfile(d)||{}, c=docClient(d)||{}, t=computeTotals(d,p);
+function ciiXml(d, opts={}){
+  let p=docProfile(d)||{}; const c=docClient(d)||{}, t=computeTotals(d,p);
+  if(opts.sellerSiren){ p={...p, siren:opts.sellerSiren, siret:'', tvaNumber: tvaFromSiren(opts.sellerSiren)}; }
   const franchise=!t.tva, ent=c.kind==='entreprise';
   const cat = r => franchise ? 'E' : (Number(r)>0 ? 'S' : 'Z');
   const sellerSiren=sirenOf(p), buyerSiren=ent?sirenOf(c):'';
@@ -745,7 +746,7 @@ ${[['DocumentFileName','The name of the embedded XML document'],['DocumentType',
 <?xpacket end="w"?>`;
 }
 /* Construit le fichier Factur-X (Uint8Array). Lance une erreur si la facture n'est pas prête. */
-async function facturxBytes(d){
+async function facturxBytes(d, opts={}){
   const issues=facturxIssues(d); if(issues.length) throw new Error(issues.join(' '));
   if(!await ensureFonts()) throw new Error('Police de caractères indisponible (connexion ?)');
   if(!window.PDFLib) throw new Error('Module PDF indisponible');
@@ -758,7 +759,7 @@ async function facturxBytes(d){
   doc.setCreationDate(now); doc.setModificationDate(now); doc.setSubject(''); doc.setKeywords([]);
   const ctx=doc.context;
   const info=ctx.lookup(ctx.trailerInfo.Info); ['Subject','Keywords'].forEach(k=>info.delete(PDFName.of(k)));
-  const xmlBytes=new TextEncoder().encode(ciiXml(d));
+  const xmlBytes=new TextEncoder().encode(ciiXml(d, opts));
   await doc.attach(xmlBytes, 'factur-x.xml', {mimeType:'text/xml', description:'Factur-X invoice', creationDate:now, modificationDate:now, afRelationship:AFRelationship.Alternative});
   const meta=ctx.stream(new TextEncoder().encode(xmpFor(title, author, iso)), {Type:'Metadata', Subtype:'XML'});
   doc.catalog.set(PDFName.of('Metadata'), ctx.register(meta));
@@ -791,16 +792,22 @@ async function pacall(action, payload={}){
   if(error){ let msg=error.message; try{ const j=await error.context.json(); msg=j.error||msg; }catch(_){} throw new Error(msg); }
   return data;
 }
+let paEnv=null;
+async function paEnvironment(){ if(!paEnv){ const st=await pacall('status'); paEnv={sandbox:!!st.sandbox, siren:st.company?.siren||''}; } return paEnv; }
 async function sendToPA(d, silent){
   const cur = S.docs.find(x=>x.id===d.id) || d;
-  if(cur.pa?.id) { if(!silent) toast('Déjà transmise à la plateforme.'); return; }
+  if(cur.pa?.id && !cur.pa?.sandbox) { if(!silent) toast('Déjà transmise à la plateforme.'); return; }
   const iss = facturxIssues(cur); if(iss.length){ if(!silent) toast(iss.join(' ')); return; }
   try{
-    const by = await facturxBytes(cur); let bin=''; for(let i=0;i<by.length;i+=0x8000) bin+=String.fromCharCode.apply(null, by.subarray(i,i+0x8000));
-    const r = await pacall('send', {base64:btoa(bin), externalId:cur.number});
+    const env = await paEnvironment();
+    // bac à sable : la plateforme n'accepte que l'entreprise fictive du compte de test
+    const opts = env.sandbox && env.siren ? {sellerSiren:env.siren} : {};
+    const by = await facturxBytes(cur, opts); let bin=''; for(let i=0;i<by.length;i+=0x8000) bin+=String.fromCharCode.apply(null, by.subarray(i,i+0x8000));
+    const r = await pacall('send', {base64:btoa(bin), externalId:env.sandbox ? cur.number+'-TEST-'+Date.now().toString(36) : cur.number});
     const last = (r.events||[]).slice(-1)[0];
-    await put('docs', {...(S.docs.find(x=>x.id===cur.id)||cur), pa:{id:r.id, sentAt:new Date().toISOString(), status:last?.status_code||'fr:200', events:r.events||[]}});
-    toast(`${cur.number} transmise à la plateforme agréée`);
+    const now = S.docs.find(x=>x.id===cur.id)||cur; const {paError, paErrorAt, ...clean} = now;
+    await put('docs', {...clean, pa:{id:r.id, sandbox:env.sandbox, sentAt:new Date().toISOString(), status:last?.status_code||'fr:200', events:r.events||[]}});
+    toast(env.sandbox ? `${cur.number} transmise à l’environnement de test` : `${cur.number} transmise à la plateforme agréée`);
   }catch(e){
     await put('docs', {...(S.docs.find(x=>x.id===cur.id)||cur), paError:e.message, paErrorAt:new Date().toISOString()});
     toast('Plateforme : '+(e.message==='pa_non_configuree'?'pas encore configurée (voir Plus > Plateforme agréée).':e.message));
@@ -819,7 +826,7 @@ async function pullPA(){
       const last=row.events[row.events.length-1];
       if(last.code===d.pa.status) continue;
       const upd={...d, pa:{...d.pa, status:last.code, events:row.events, updatedAt:new Date().toISOString()}};
-      if(paCode(last.code)===212 && d.status!=='payee'){ upd.status='payee'; upd.paidAt=(last.at||'').slice(0,10)||todayISO(); upd.paidAssumed=false; }
+      if(paCode(last.code)===212 && d.status!=='payee' && !d.pa.sandbox){ upd.status='payee'; upd.paidAt=(last.at||'').slice(0,10)||todayISO(); upd.paidAssumed=false; }
       await put('docs', upd);
       toast(`${d.number} : ${paLabel(last.code)}`);
     }
@@ -828,7 +835,7 @@ async function pullPA(){
 }
 function PACard(){
   useStore(); const st=settings(); const [status,setStatus]=useState(null);
-  const check=()=>{ setStatus({loading:true}); pacall('status').then(setStatus).catch(e=>setStatus({error:e.message})); };
+  const check=()=>{ paEnv=null; setStatus({loading:true}); pacall('status').then(setStatus).catch(e=>setStatus({error:e.message})); };
   useEffect(check,[]);
   return html`<div class="card stack"><h2>Facture électronique</h2>
     <div class="small">Plateforme agréée : <b>SuperPDP</b>${status?.loading?' · vérification…': status?.ok ? html` · <span style="color:var(--ok)">connectée</span>${status.company?.name?' ('+status.company.name+')':''}${status.sandbox?html` · <span class="pill draft">Environnement de test</span>`:html` · <span class="pill late">Production : envois réels</span>`}` : status?.error ? html` · <span style="color:var(--bad)">${status.error==='pa_non_configuree'?'pas encore configurée':status.error}</span>`:''}</div>
@@ -1074,7 +1081,7 @@ function ProductPicker({onPick, onClose}){
 function DocList({docs}){
   return html`<div class="list">${docs.map(d=>{ const st=docState(d); const t=computeTotals(d,docProfile(d)); return html`<button class="item" onClick=${()=>open('doc',{doc:d})}>
     <div class="grow"><div class="t">${clientName(docClient(d))}</div><div class="tiny">${d.number || (d.type==='facture'?'Facture':'Devis')+' brouillon'}${d.eventDate?' · prestation le '+fdate(d.eventDate):''}${d.eventType?' · '+d.eventType:''}</div></div>
-    <div style="text-align:right;display:flex;flex-direction:column;gap:3px;align-items:flex-end"><span class="amt">${eur(t.ttc)}</span><span class=${'pill '+st.k}>${st.l}</span>${d.pa?.id ? html`<span class=${'pill '+paTone(d.pa.status)}>⇄ ${paLabel(d.pa.status)}</span>`:''}</div></button>`; })}</div>`;
+    <div style="text-align:right;display:flex;flex-direction:column;gap:3px;align-items:flex-end"><span class="amt">${eur(t.ttc)}</span><span class=${'pill '+st.k}>${st.l}</span>${d.pa?.id ? html`<span class=${'pill '+paTone(d.pa.status)}>⇄ ${paLabel(d.pa.status)}${d.pa.sandbox?' (test)':''}</span>`:''}</div></button>`; })}</div>`;
 }
 function DocsView(){
   useStore(); const [type,setType]=useState(lsGet('cabine-doctype')||'facture'); const [filter,setFilter]=useState('all');
@@ -1145,7 +1152,7 @@ function DocEditor({doc, isNew, onClose}){
     ${locked && html`<div class="notice">Cette facture est numérotée : son contenu est figé. Vous pouvez la télécharger, l’envoyer et suivre son paiement.</div>`}
     ${isInv && d.number && !facturxApplies(d) && html`<div class="tiny">Client particulier : facture PDF classique. Les ventes aux particuliers seront déclarées via la plateforme agréée (e-reporting) à partir de septembre 2027.</div>`}
     ${isInv && d.number && facturxApplies(d) && (()=>{ const iss=facturxIssues(d); return iss.length ? html`<div class="notice warn small"><b>Facture électronique :</b> ${iss.join(' ')}</div>` : html`<div class="small" style="color:var(--ok)">✓ Facture électronique (Factur-X) prête : le PDF téléchargé ou envoyé contient les données de la facture.</div>`; })()}
-    ${live?.pa?.id && html`<div class="card row sb"><div><div style="font-weight:600">Plateforme agréée</div><div class="tiny">Transmise le ${new Date(live.pa.sentAt).toLocaleDateString('fr-FR')}${live.pa.updatedAt?' · mise à jour le '+new Date(live.pa.updatedAt).toLocaleDateString('fr-FR'):''}</div></div><span class=${'pill '+paTone(live.pa.status)}>${paLabel(live.pa.status)}</span></div>`}
+    ${live?.pa?.id && html`<div class="card row sb"><div><div style="font-weight:600">Plateforme agréée${live.pa.sandbox?' (test)':''}</div><div class="tiny">Transmise le ${new Date(live.pa.sentAt).toLocaleDateString('fr-FR')}${live.pa.updatedAt?' · mise à jour le '+new Date(live.pa.updatedAt).toLocaleDateString('fr-FR'):''}</div></div><span class=${'pill '+paTone(live.pa.status)}>${paLabel(live.pa.status)}</span></div>`}
     ${live?.paError && !live?.pa?.id && html`<div class="notice warn small">Dernier essai d’envoi à la plateforme refusé : ${live.paError}</div>`}
     ${d.imported && html`<div class="notice small">Facture importée de votre historique.${d.paidAssumed?' Le statut « payée » a été déduit de la date d’échéance. Corrigez-le si besoin.':''}</div>`}
     <fieldset disabled=${locked} style="border:0;padding:0;margin:0;display:flex;flex-direction:column;gap:16px;min-width:0">
@@ -1194,7 +1201,7 @@ function DocEditor({doc, isNew, onClose}){
       ${isInv && d.status==='payee' && html`<button class="btn" onClick=${async()=>{ const o={...clone(d), status:'finalisee', paidAt:''}; await put('docs',o); setD(o); }}>Annuler le paiement</button>`}
       ${!isInv && d.number && d.status==='envoye' && html`<button class="btn pri" onClick=${async()=>{ const o={...clone(d), status:'accepte'}; await put('docs',o); setD(o); }}>Accepté</button><button class="btn" onClick=${async()=>{ const o={...clone(d), status:'refuse'}; await put('docs',o); setD(o); }}>Refusé</button>`}
       ${!isInv && d.status!=='facture' && d.status!=='refuse' && html`<button class="btn" onClick=${toInvoice}>Transformer en facture</button>`}
-      ${backend.mode==='supabase' && settings().paEnabled && isInv && d.number && facturxApplies(d) && !d.pa?.id && d.status!=='annulee' && html`<button class="btn pri" onClick=${()=>sendToPA(d)}>Transmettre via la plateforme agréée</button>`}
+      ${backend.mode==='supabase' && settings().paEnabled && isInv && d.number && facturxApplies(d) && (!d.pa?.id || d.pa?.sandbox) && d.status!=='annulee' && html`<button class="btn pri" onClick=${()=>sendToPA(d)}>Transmettre via la plateforme agréée</button>`}
       ${backend.mode==='supabase' && d.number && html`<button class="btn ${settings().paEnabled&&facturxApplies(d)?'':'pri'}" onClick=${()=>open('send',{doc:d})}>${d.sentAt?'Renvoyer par e-mail':'Envoyer par e-mail'}</button>`}
       <button class="btn" onClick=${()=>downloadPdf(d)}>Télécharger le PDF</button>
       <button class="btn ghost" onClick=${duplicate}>Dupliquer</button>
