@@ -76,6 +76,8 @@ jobs:
               TOK=$(jq -r .access_token $F); echo "::add-mask::$TOK"
               ME=$(curl -sS -o /tmp/me.json -w "%{http_code}" "${SUPERPDP_API_URL:-https://api.superpdp.tech/v1.beta}/companies/me" -H "Authorization: Bearer $TOK")
               echo "Accès au compte entreprise ($F) : HTTP $ME — $(jq -r '.error.message // .message // .error // empty' /tmp/me.json 2>/dev/null | cut -c1-160)"
+              echo "Champs du compte : $(jq -r 'keys | join(", ")' /tmp/me.json 2>/dev/null)"
+              echo "Indicateurs d'environnement : $(jq -c '[paths(scalars) as $p | select(($p|map(tostring)|join(".")|test("sandbox|env|mode|live|test";"i"))) | {($p|map(tostring)|join(".")): getpath($p)}]' /tmp/me.json 2>/dev/null)"
               break
             fi
           done
