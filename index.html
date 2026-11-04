@@ -102,7 +102,7 @@ label.f textarea{min-height:76px;resize:vertical}
 .sheet{background:var(--bg);width:100%;max-width:760px;max-height:100%;overflow:auto;border-radius:14px 14px 0 0;display:flex;flex-direction:column}
 .sheet-h{position:sticky;top:0;z-index:2;background:var(--bg);display:flex;align-items:center;justify-content:space-between;gap:8px;padding:calc(12px + env(safe-area-inset-top,0px)) max(16px,env(safe-area-inset-right,0px)) 12px max(16px,env(safe-area-inset-left,0px));border-bottom:1px solid var(--line)}
 .sheet-b{padding:16px max(16px,env(safe-area-inset-right,0px)) calc(24px + env(safe-area-inset-bottom,0px)) max(16px,env(safe-area-inset-left,0px));display:flex;flex-direction:column;gap:16px}
-@media (max-width:640px){.sheet{height:100%;border-radius:0}}
+@media (max-width:640px){.sheet{height:100%;border-radius:0}.sheet.compact{height:auto;max-height:80%;border-radius:14px 14px 0 0}.sheet.compact .sheet-h{padding-top:12px}}
 @media (min-width:641px){.overlay{align-items:center;padding:24px}.sheet{border-radius:14px;max-height:92vh;box-shadow:var(--shadow)}.sheet-h{padding-top:12px}}
 .sect{display:flex;flex-direction:column;gap:10px}
 .sect>.lab{font-size:.75rem;text-transform:uppercase;letter-spacing:.07em;color:var(--ink-2);font-weight:600}
@@ -144,6 +144,21 @@ label.f textarea{min-height:76px;resize:vertical}
 .chip{display:inline-flex;align-items:center;gap:6px;border:1px solid var(--line);background:var(--surface);border-radius:999px;padding:5px 12px 5px 6px;font-weight:600;font-size:.88rem;max-width:100%}
 .chip .dot{width:20px;height:20px;border-radius:50%;flex:none}
 .chip select{border:0;background:none;font-weight:600;max-width:200px}
+.line-nums{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:8px;align-items:end}
+.line-total b{display:block;font-size:1rem;color:var(--ink);padding:9px 0;white-space:nowrap}
+.line-total{font-size:.82rem;font-weight:600;color:var(--ink-2)}
+.doc-sum .sum-grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(130px,1fr));gap:8px 14px}
+.doc-sum .sum-grid>div{display:flex;flex-direction:column;gap:1px;font-size:.92rem}
+.doc-sum .sum-lines{display:flex;flex-direction:column;gap:8px;border-top:1px solid var(--line);padding-top:10px;font-size:.92rem}
+.ed-bar{display:none}
+@media (max-width:700px){
+  .ed-acts{display:none}
+  .sheet.wide>.sheet-b{flex:1 0 auto}
+  .ed-bar{display:flex;margin-top:auto !important;position:sticky;bottom:0;z-index:3;margin:8px -16px calc(-24px - env(safe-area-inset-bottom,0px));padding:10px max(16px,env(safe-area-inset-right,0px)) calc(10px + env(safe-area-inset-bottom,0px)) max(16px,env(safe-area-inset-left,0px));background:var(--surface);border-top:1px solid var(--line);align-items:center;justify-content:space-between;gap:10px;box-shadow:0 -6px 18px rgba(0,0,0,.08)}
+  .ed-bar-total{display:flex;flex-direction:column;line-height:1.15;min-width:0}
+  .ed-bar-total b{font-family:var(--f-display);font-size:1.05rem;white-space:nowrap}
+  .ed-bar .btn.sm{min-height:38px;padding:6px 10px}
+}
 .sheet.wide{max-width:1280px}
 .ed-grid{display:grid;grid-template-columns:minmax(0,1fr);gap:20px}
 .ed-form{display:flex;flex-direction:column;gap:16px;min-width:0}
@@ -1012,12 +1027,12 @@ const I = {
 };
 
 /* ---------------- composants de base ---------------- */
-function Sheet({title, onClose, actions, children, wide}){
+function Sheet({title, onClose, actions, children, wide, compact}){
   // toujours la version actuelle de onClose (sinon Échap réenregistrerait un état périmé)
   const closeRef=useRef(onClose); closeRef.current=onClose; const box=useRef(null);
   useEffect(()=>{ const k=e=>{ if(e.key!=='Escape') return; const all=[...document.querySelectorAll('.overlay')]; if(all[all.length-1]===box.current){ e.preventDefault(); closeRef.current(); } }; addEventListener('keydown',k); return ()=>removeEventListener('keydown',k); },[]);
   return html`<div class="overlay" ref=${box} onClick=${e=>{ if(e.target===e.currentTarget) onClose(); }}>
-    <div class=${'sheet'+(wide?' wide':'')} role="dialog" aria-label=${title}>
+    <div class=${'sheet'+(wide?' wide':'')+(compact?' compact':'')} role="dialog" aria-label=${title}>
       <div class="sheet-h"><button class="btn ghost sm" onClick=${onClose}>Fermer</button><h2 style="flex:1;text-align:center;font-size:1.05rem">${title}</h2><div class="row">${actions}</div></div>
       <div class="sheet-b">${children}</div>
     </div></div>`;
@@ -1046,7 +1061,7 @@ function Sheets(){
   const [stack,setStack]=useState([]);
   useEffect(()=>{ pushSheet = s => setStack(x=>[...x,s]); },[]);
   const close = key => setStack(x=>x.filter(s=>s.key!==key));
-  const C = {monthBill:MonthBillSheet, importOv:ImportOverlaySheet, colorOne:ColorOne, dups:DuplicatesSheet, colors:ColorsSheet, yearDetail:YearDetail, send:SendSheet, booking:BookingView, bookingSettings:BookingSettings, client:ClientForm, product:ProductForm, profile:ProfileForm, doc:DocEditor, event:EventForm, confirm:Confirm, clientView:ClientView, picker:ProductPicker};
+  const C = {actions:ActionsSheet, monthBill:MonthBillSheet, importOv:ImportOverlaySheet, colorOne:ColorOne, dups:DuplicatesSheet, colors:ColorsSheet, yearDetail:YearDetail, send:SendSheet, booking:BookingView, bookingSettings:BookingSettings, client:ClientForm, product:ProductForm, profile:ProfileForm, doc:DocEditor, event:EventForm, confirm:Confirm, clientView:ClientView, picker:ProductPicker};
   return stack.map(s=>{ const Comp=C[s.kind]; return html`<${Comp} key=${s.key} ...${s.props} onClose=${()=>close(s.key)} />`; });
 }
 
@@ -1332,6 +1347,7 @@ function DocEditor({doc, isNew, onClose}){
   const setLine = (i,k,v)=>setD(x=>({...x, lines:x.lines.map((l,j)=>j===i?{...l,[k]:v}:l)}));
   const addLine = (l)=>setD(x=>({...x, lines:[...(x.lines||[]), {id:uid(), title:l?.title||'', description:l?.description||'', qty:1, unit:l?.unit||0, qunit:l?.qunit||'', disc:0, discKind:'%', vat: vatOn(p)?(l?.vat??20):0}]}));
   const [tab,setTab] = useState('edit');
+  const [opts,setOpts] = useState({});
   const dirty = JSON.stringify(d)!==JSON.stringify(live||{});
   async function save(silent){ const cur=S.docs.find(x=>x.id===d.id); if(cur?.number && !d.number){ setD(clone(cur)); return cur; } const o=clone(d); o.lines=(o.lines||[]).map(l=>({...l, qty:Number(l.qty)||0, unit:Math.round((Number(l.unit)||0)*10000)/10000, vat:Number(l.vat)||0, disc:Number(l.disc)||0})); o.deposit=r2(o.deposit); o.remisePct=Number(o.remisePct)||0; o.updatedAt=new Date().toISOString(); await put('docs',o); setD(o); if(!silent) toast('Enregistré'); return o; }
   function finalize(){
@@ -1360,21 +1376,59 @@ function DocEditor({doc, isNew, onClose}){
   function duplicate(){ const c=newDoc(d.type,{profileId:d.profileId, clientId:d.clientId, lines:clone(d.lines).map(l=>({...l,id:uid()})), eventType:d.eventType, eventLocation:d.eventLocation, notes:d.notes, remisePct:d.remisePct||0}); onClose(); open('doc',{doc:c, isNew:true}); }
   const title = d.number ? `${DOC_LABEL[d.type]} ${d.number}` : (isAv ? 'Avoir (brouillon)' : isNew?(isInv?'Nouvelle facture':'Nouveau devis'):(isInv?'Facture brouillon':'Devis brouillon'));
   const st = docState(d);
+  // ---- actions : principales (barre du bas sur téléphone) et secondaires (menu « Plus »)
+  const acts=[];
+  const A=(label,run,o={})=>acts.push({label,run,...o});
+  const setStatus=async(patch,msg)=>{ const o={...clone(d), ...patch}; await put('docs',o); setD(o); if(msg) toast(msg); };
+  const canPA = backend.mode==='supabase' && settings().paEnabled && (isInv||isAv) && d.number && facturxApplies(d) && (!d.pa?.id || d.pa?.sandbox) && d.status!=='annulee';
+  if(!d.number){
+    A(isAv?'Finaliser l’avoir':isInv?'Finaliser':'Finaliser le devis', finalize, {pri:true, main:true});
+    A('Enregistrer', ()=>save(), {main:true, disabled:!dirty && !!live});
+  }
+  if(canPA) A('Transmettre via la plateforme', ()=>sendToPA(d), {pri:true, main:true});
+  if(isInv && d.number && d.status!=='payee' && d.status!=='annulee' && !fullyCredited(d)) A('Marquer payée', ()=>setStatus({status:'payee', paidAt:todayISO(), paidAssumed:false},'Facture marquée payée'), {pri:!canPA, main:true});
+  if(!isInv && !isAv && d.number && d.status==='envoye'){ A('Accepté', ()=>setStatus({status:'accepte'}), {pri:true, main:true}); A('Refusé', ()=>setStatus({status:'refuse'})); }
+  if(backend.mode==='supabase' && d.number) A(d.sentAt?'Renvoyer par e-mail':'Envoyer par e-mail', ()=>open('send',{doc:d}), {main:true});
+  if(!isInv && !isAv && d.status!=='facture' && d.status!=='refuse') A('Transformer en facture', toInvoice, {main:!!d.number});
+  A('Télécharger le PDF', async()=>{ if(!locked && dirty) await save(true); downloadPdf(d); });
+  if(isInv && d.number && d.status!=='annulee' && !fullyCredited(d)) A('Créer un avoir', ()=>open('doc',{doc:newAvoir(d), isNew:true}));
+  if(isInv && d.status==='payee') A('Annuler le paiement', ()=>setStatus({status:'finalisee', paidAt:''}));
+  if(!isAv) A('Dupliquer', duplicate);
+  if(!d.number && live) A('Supprimer ce brouillon', ()=>open('confirm',{title:'Supprimer ce brouillon ?', text:'Il n’a pas encore de numéro, il peut être supprimé sans problème.', yes:'Supprimer', danger:true, onYes:()=>{ del('docs',d.id); S.events.filter(e=>e.invoiceId===d.id).forEach(e=>put('events',{...e,invoiceId:''})); onClose(); }}), {danger:true});
+  if(isInv && d.number && d.status!=='annulee' && !avoirs.length) A('Annuler (jamais envoyée)', ()=>open('confirm',{title:'Annuler cette facture ?', text:'À utiliser seulement si la facture n’a jamais été envoyée au client. Elle restera dans vos documents avec la mention « Annulée » et son numéro ne sera pas réutilisé. Si le client l’a reçue, créez plutôt un avoir.', yes:'Annuler la facture', danger:true, onYes:()=>setStatus({status:'annulee'})}), {danger:true});
+  const main=acts.filter(a=>a.main).slice(0,2), rest=acts.filter(a=>!main.includes(a));
+  const btn=(a,extra='')=>html`<button class=${'btn'+(a.pri?' pri':'')+(a.danger?' danger':'')+extra} disabled=${a.disabled} onClick=${a.run}>${a.label}</button>`;
   return html`<${Sheet} wide title=${title} onClose=${async()=>{ if(!locked && dirty && (d.clientId||d.lines.length)) await save(true); onClose(); }}
       actions=${html`<button class="btn sm" onClick=${async()=>{ if(!locked && dirty) await save(true); downloadPdf(d); }}>PDF</button>`}>
-    <div class="seg ed-tabs" style="align-self:center">${[['edit','Modifier'],['preview','Aperçu du PDF']].map(([k,l])=>html`<button class=${tab===k?'on':''} onClick=${()=>setTab(k)}>${l}</button>`)}</div>
+    <div class="seg ed-tabs" style="align-self:center">${[['edit',locked?'Détails':'Modifier'],['preview','Aperçu du PDF']].map(([k,l])=>html`<button class=${tab===k?'on':''} onClick=${()=>setTab(k)}>${l}</button>`)}</div>
     <div class="ed-grid" data-tab=${tab}>
     <div class="ed-form">
     <div class="row sb"><span class=${'pill '+st.k}>${st.l}</span>${d.copiedFrom && !d.number && html`<span class="tiny">Lignes reprises de ${d.copiedFrom}, dates mises à jour</span>`}${d.fromQuote && html`<span class="tiny">Issue du devis ${d.fromQuote}</span>`}</div>
     ${d.monthly && html`<div class="notice small"><b>Facture du mois de ${monthLabel(d.billingMonth)}</b> · ${d.monthCount||0} date${(d.monthCount||0)>1?'s':''}. ${!d.number?'Les dates ajoutées ou retirées dans l’agenda mettent à jour la liste et la quantité automatiquement ; vous pouvez modifier les prix.':''}</div>`}
     ${isAv && html`<div class="notice small">Avoir sur la facture <b>${d.creditOfNumber}</b>${d.creditOfDate?' du '+fdate(d.creditOfDate):''}. ${!d.number?'Par défaut il reprend toute la facture (annulation complète) ; modifiez les lignes ou les montants pour un avoir partiel.':''}</div>`}
-    ${locked && !isAv && html`<div class="notice">Cette facture est numérotée : son contenu est figé. Vous pouvez la télécharger, l’envoyer et suivre son paiement.${avoirs.length?'':' Pour la corriger ou l’annuler, créez un avoir.'}</div>`}
+    ${locked && !isAv && html`<div class="tiny">Facture numérotée : son contenu ne peut plus changer.${avoirs.length?'':' Pour la corriger ou l’annuler, créez un avoir.'}</div>`}
     ${avoirs.length>0 && html`<div class="card stack"><div style="font-weight:600">Avoirs sur cette facture</div>${avoirs.map(a=>html`<button class="item" style="padding:6px 0" onClick=${()=>open('doc',{doc:a})}><div class="grow">${a.number||'Avoir brouillon'}${a.reason?' · '+a.reason:''}</div><span class="amt">- ${eur(computeTotals(a,docProfile(a)).ttc)}</span></button>`)}<div class="row sb small"><span>Reste dû</span><b>${eur(dueOf(d))}</b></div></div>`}
     ${(isInv||isAv) && d.number && !facturxApplies(d) && html`<div class="tiny">Client particulier : facture PDF classique. Les ventes aux particuliers seront déclarées via la plateforme agréée (e-reporting) à partir de septembre 2027.</div>`}
     ${(isInv||isAv) && d.number && facturxApplies(d) && (()=>{ const iss=facturxIssues(d); return iss.length ? html`<div class="notice warn small"><b>Facture électronique :</b> ${iss.join(' ')}</div>` : html`<div class="small" style="color:var(--ok)">✓ Facture électronique (Factur-X) prête : le PDF téléchargé ou envoyé contient les données de la facture.</div>`; })()}
     ${live?.pa?.id && html`<div class="card row sb"><div><div style="font-weight:600">Plateforme agréée${live.pa.sandbox?' (test)':''}</div><div class="tiny">Transmise le ${new Date(live.pa.sentAt).toLocaleDateString('fr-FR')}${live.pa.format==='cii'?' (format XML CII)':' (Factur-X)'}${live.pa.updatedAt?' · mise à jour le '+new Date(live.pa.updatedAt).toLocaleDateString('fr-FR'):''}</div></div><span class=${'pill '+paTone(live.pa.status)}>${paLabel(live.pa.status)}</span></div>`}
     ${live?.paError && !live?.pa?.id && html`<div class="notice warn small">Dernier essai d’envoi à la plateforme refusé : ${live.paError}</div>`}
-    ${d.imported && html`<div class="notice small">Facture importée de votre historique.${d.paidAssumed?' Le statut « payée » a été déduit de la date d’échéance. Corrigez-le si besoin.':''}</div>`}
+    ${d.imported && html`<div class="tiny">Importée de votre historique facture.net.${d.paidAssumed?' Statut « payée » déduit de l’échéance : corrigez-le si besoin.':''}</div>`}
+    ${locked ? html`
+    <div class="card stack doc-sum">
+      <div class="row sb" style="align-items:flex-start"><div><div class="tiny">${isAv?'Avoir pour':'Client'}</div><div style="font-weight:600;font-size:1.05rem">${clientName(docClient(d))}</div><div class="tiny">${[docClient(d)?.address, [docClient(d)?.cp, docClient(d)?.city].filter(Boolean).join(' ')].filter(Boolean).join(', ')}</div></div>
+        <div style="text-align:right"><div class="tiny">${isAv?'Montant de l’avoir':'Total'}</div><div style="font-family:var(--f-display);font-weight:700;font-size:1.35rem;white-space:nowrap">${isAv?'− ':''}${eur(t.ttc)}</div>${isInv && dueOf(d)!==t.ttc && !fullyCredited(d) ? html`<div class="tiny">Reste dû ${eur(dueOf(d))}</div>`:''}</div></div>
+      <div class="sum-grid">
+        <div><span class="tiny">Date</span>${fdate(d.issueDate)}</div>
+        ${isInv && d.dueDate && html`<div><span class="tiny">Échéance</span>${fdate(d.dueDate)}</div>`}
+        ${d.monthly ? html`<div><span class="tiny">Période</span>${monthLabel(d.billingMonth)} · ${d.monthCount||0} dates</div>` : d.eventDate ? html`<div><span class="tiny">Prestation</span>${fdate(d.eventDate)}${d.eventLocation?' · '+d.eventLocation:''}</div>` : ''}
+        ${isAv && d.creditOfNumber && html`<div><span class="tiny">Sur la facture</span>${d.creditOfNumber}</div>`}
+        ${isInv && d.paidAt && d.status==='payee' && html`<div><span class="tiny">Payée le</span>${fdate(d.paidAt)}${d.paidAssumed?' (supposé)':''}</div>`}
+        ${d.sentAt && html`<div><span class="tiny">Envoyée</span>${new Date(d.sentAt).toLocaleDateString('fr-FR')}</div>`}
+      </div>
+      <div class="sum-lines">${(d.lines||[]).map(l=>html`<div class="row sb" style="flex-wrap:nowrap;align-items:flex-start"><div style="min-width:0"><div>${l.title||'Ligne'}</div>${l.description?html`<div class="tiny" style="white-space:pre-line">${l.description.split('\n').slice(0,4).join('\n')}${l.description.split('\n').length>4?' …':''}</div>`:''}</div><div style="text-align:right;white-space:nowrap"><div>${eur(lineTotal(l))}</div>${Number(l.qty)!==1?html`<div class="tiny">${String(l.qty).replace('.',',')} × ${eur(l.unit)}</div>`:''}</div></div>`)}</div>
+      ${t.pct ? html`<div class="row sb tiny"><span>Remise générale ${t.pct} %</span><span>− ${eur(t.remise)}</span></div>`:''}
+    </div>
+    ` : html`
     <fieldset disabled=${locked} style="border:0;padding:0;margin:0;display:flex;flex-direction:column;gap:16px;min-width:0">
       <div class="sect"><div class="lab">Client et profil</div>
         <${ClientPicker} value=${d.clientId} onChange=${v=>set('clientId',v)}/>
@@ -1388,17 +1442,19 @@ function DocEditor({doc, isNew, onClose}){
         </div></div>
       <div class="sect"><div class="lab">Lignes</div>
         ${(d.lines||[]).map((l,i)=>html`<div class="line-ed" key=${l.id}>
-          <div class="row" style="flex-wrap:nowrap;align-items:flex-end"><label class="f" style="flex:1">Titre<input value=${l.title} onInput=${e=>setLine(i,'title',e.target.value)}/></label>${!locked && html`<button class="btn ghost sm" aria-label="Supprimer la ligne" onClick=${()=>setD(x=>({...x,lines:x.lines.filter((_,j)=>j!==i)}))}>Retirer</button>`}</div>
-          <label class="f">Description<textarea style="min-height:50px" value=${l.description} onInput=${e=>setLine(i,'description',e.target.value)}></textarea></label>
-          <div class="nums">
-            <label class="f">Quantité<input type="number" step="0.5" value=${l.qty} onInput=${e=>setLine(i,'qty',e.target.value)}/></label>
-            <label class="f">${t.tva?'Prix unit. HT':'Prix unitaire'}<input type="number" step="any" value=${l.unit} onInput=${e=>setLine(i,'unit',e.target.value)}/></label>
-            <label class="f">Unité<input value=${l.qunit||''} placeholder="—" onInput=${e=>setLine(i,'qunit',e.target.value)}/></label>
-            ${t.tva && html`<label class="f">TVA %<select value=${String(l.vat)} onChange=${e=>setLine(i,'vat',Number(e.target.value))}>${['20','10','5.5','2.1','0'].map(v=>html`<option value=${v}>${v.replace('.',',')} %</option>`)}</select></label>`}
-            <label class="f">Réduction<span class="row" style="flex-wrap:nowrap;gap:4px"><input class="inp" type="number" step="0.01" value=${l.disc||''} placeholder="0" onInput=${e=>setLine(i,'disc',e.target.value)}/><select class="inp" style="width:auto" value=${l.discKind||'%'} onChange=${e=>setLine(i,'discKind',e.target.value)}><option value="%">%</option><option value="€">€</option></select></span></label>
-            <div class="f" style="font-size:.82rem;font-weight:600;color:var(--ink-2)">Total<div style="font-size:1rem;color:var(--ink);padding:9px 0">${eur(lineTotal(l))}</div></div>
+          <div class="row" style="flex-wrap:nowrap;align-items:flex-end"><label class="f" style="flex:1">Titre<input value=${l.title} onInput=${e=>setLine(i,'title',e.target.value)}/></label><button class="btn ghost sm" aria-label="Supprimer la ligne" onClick=${()=>setD(x=>({...x,lines:x.lines.filter((_,j)=>j!==i)}))}>Retirer</button></div>
+          <label class="f">Description<textarea rows=${Math.min(6,Math.max(1,(l.description||'').split('\n').length))} style="min-height:0" value=${l.description} onInput=${e=>setLine(i,'description',e.target.value)}></textarea></label>
+          <div class="line-nums">
+            <label class="f">Quantité<input type="number" inputmode="decimal" step="any" value=${l.qty} onInput=${e=>setLine(i,'qty',e.target.value)}/></label>
+            <label class="f">${t.tva?'Prix unit. HT':'Prix unitaire'}<input type="number" inputmode="decimal" step="any" value=${l.unit} onInput=${e=>setLine(i,'unit',e.target.value)}/></label>
+            <div class="f line-total">Total<b>${eur(lineTotal(l))}</b></div>
           </div>
-          ${!locked && !S.products.some(x=>x.title===l.title) && l.title && html`<button class="btn ghost sm" style="align-self:flex-start" onClick=${()=>{ put('products',{id:uid(), title:l.title.replace(DATE_RE,'').trim(), description:(l.description||'').replace(DATE_RE,'').trim(), unit:Number(l.unit)||0, qunit:l.qunit||'', vat:Number(l.vat)||0, createdAt:new Date().toISOString()}); toast('Ajouté au catalogue'); }}>Enregistrer dans le catalogue</button>`}
+          ${(opts[l.id] || l.qunit || Number(l.disc) || (t.tva && Number(l.vat)!==20)) ? html`<div class="line-nums">
+            <label class="f">Unité<input value=${l.qunit||''} placeholder="heures, km…" onInput=${e=>setLine(i,'qunit',e.target.value)}/></label>
+            ${t.tva && html`<label class="f">TVA<select value=${String(l.vat)} onChange=${e=>setLine(i,'vat',Number(e.target.value))}>${['20','10','5.5','2.1','0'].map(v=>html`<option value=${v}>${v.replace('.',',')} %</option>`)}</select></label>`}
+            <label class="f">Réduction<span class="row" style="flex-wrap:nowrap;gap:4px"><input class="inp" type="number" inputmode="decimal" step="any" value=${l.disc||''} placeholder="0" onInput=${e=>setLine(i,'disc',e.target.value)}/><select class="inp" style="width:auto;padding-inline:6px" value=${l.discKind||'%'} onChange=${e=>setLine(i,'discKind',e.target.value)}><option value="%">%</option><option value="€">€</option></select></span></label>
+          </div>` : html`<button class="btn ghost sm" style="align-self:flex-start;min-height:0;padding:2px 0" onClick=${()=>setOpts(o=>({...o,[l.id]:true}))}>+ Unité, ${t.tva?'TVA, ':''}réduction</button>`}
+          ${!S.products.some(x=>x.title===l.title) && l.title && html`<button class="btn ghost sm" style="align-self:flex-start;min-height:0;padding:2px 0" onClick=${()=>{ put('products',{id:uid(), title:l.title.replace(DATE_RE,'').trim(), description:(l.description||'').replace(DATE_RE,'').trim(), unit:Number(l.unit)||0, qunit:l.qunit||'', vat:Number(l.vat)||0, createdAt:new Date().toISOString()}); toast('Ajouté au catalogue'); }}>Enregistrer dans le catalogue</button>`}
         </div>`)}
         ${!locked && html`<div class="row"><button class="btn" onClick=${()=>open('picker',{onPick:addLine})}>Ajouter depuis le catalogue</button><button class="btn ghost" onClick=${()=>addLine()}>Ligne libre</button></div>`}
       </div>
@@ -1415,25 +1471,22 @@ function DocEditor({doc, isNew, onClose}){
              : html`<div class="big"><span>${t.pct?'Total final':'Total'}</span><span>${eur(t.ttc)}</span></div><div class="tiny">TVA non applicable, art. 293 B du CGI</div>`}
       ${isInv && t.deposit>0 && html`<div class="muted"><span>Acompte versé</span><span>- ${eur(t.deposit)}</span></div><div class="big"><span>Reste à payer</span><span>${eur(t.due)}</span></div>`}
     </div>
-    <div class="row">
-      ${!d.number && html`<button class="btn" onClick=${()=>save()} disabled=${!dirty && !!live}>Enregistrer le brouillon</button><button class="btn pri" onClick=${finalize}>${isAv?'Finaliser l’avoir':isInv?'Finaliser et numéroter':'Finaliser le devis'}</button>`}
-      ${isInv && d.number && d.status!=='annulee' && !fullyCredited(d) && html`<button class="btn" onClick=${()=>open('doc',{doc:newAvoir(d), isNew:true})}>Créer un avoir</button>`}
-      ${isInv && d.number && d.status!=='payee' && d.status!=='annulee' && !fullyCredited(d) && html`<button class="btn pri" onClick=${async()=>{ const o={...clone(d), status:'payee', paidAt:todayISO()}; await put('docs',o); setD(o); toast('Facture marquée payée'); }}>Marquer payée</button>`}
-      ${isInv && d.status==='payee' && html`<button class="btn" onClick=${async()=>{ const o={...clone(d), status:'finalisee', paidAt:''}; await put('docs',o); setD(o); }}>Annuler le paiement</button>`}
-      ${!isInv && d.number && d.status==='envoye' && html`<button class="btn pri" onClick=${async()=>{ const o={...clone(d), status:'accepte'}; await put('docs',o); setD(o); }}>Accepté</button><button class="btn" onClick=${async()=>{ const o={...clone(d), status:'refuse'}; await put('docs',o); setD(o); }}>Refusé</button>`}
-      ${!isInv && d.status!=='facture' && d.status!=='refuse' && html`<button class="btn" onClick=${toInvoice}>Transformer en facture</button>`}
-      ${backend.mode==='supabase' && settings().paEnabled && (isInv||isAv) && d.number && facturxApplies(d) && (!d.pa?.id || d.pa?.sandbox) && d.status!=='annulee' && html`<button class="btn pri" onClick=${()=>sendToPA(d)}>Transmettre via la plateforme agréée</button>`}
-      ${backend.mode==='supabase' && d.number && html`<button class="btn ${settings().paEnabled&&facturxApplies(d)?'':'pri'}" onClick=${()=>open('send',{doc:d})}>${d.sentAt?'Renvoyer par e-mail':'Envoyer par e-mail'}</button>`}
-      <button class="btn" onClick=${()=>downloadPdf(d)}>Télécharger le PDF</button>
-      <button class="btn ghost" onClick=${duplicate}>Dupliquer</button>
-      ${!d.number && live && html`<button class="btn danger" onClick=${()=>open('confirm',{title:'Supprimer ce brouillon ?', text:'Il n’a pas encore de numéro, il peut être supprimé sans problème.', yes:'Supprimer', danger:true, onYes:()=>{ del('docs',d.id); S.events.filter(e=>e.invoiceId===d.id).forEach(e=>put('events',{...e,invoiceId:''})); onClose(); }})}>Supprimer</button>`}
-      ${isInv && d.number && d.status!=='annulee' && !avoirs.length && html`<button class="btn danger" onClick=${()=>open('confirm',{title:'Annuler cette facture ?', text:'À utiliser seulement si la facture n’a jamais été envoyée au client. Elle restera dans vos documents avec la mention « Annulée » et son numéro ne sera pas réutilisé. Si le client l’a reçue, créez plutôt un avoir.', yes:'Annuler la facture', danger:true, onYes:async()=>{ const o={...clone(d), status:'annulee'}; await put('docs',o); setD(o); }})}>Annuler la facture</button>`}
-    </div>
+    `}
+    <div class="row ed-acts">${acts.map(a=>btn(a))}</div>
     ${d.sentAt ? html`<div class="tiny">Envoyé le ${new Date(d.sentAt).toLocaleDateString('fr-FR')} à ${d.sentTo}</div>` : backend.mode!=='supabase' ? html`<div class="tiny">L’envoi par e-mail est disponible sur la version installée. Ici, téléchargez le PDF et joignez-le à votre e-mail.</div>` : (!d.number ? html`<div class="tiny">Finalisez le document pour pouvoir l’envoyer par e-mail.</div>` : '')}
     </div>
     <div class="ed-prev"><div class="tiny">Aperçu en direct</div><${PdfPreview} doc=${d}/></div>
     </div>
+    <div class="ed-bar">
+      <div class="ed-bar-total"><span class="tiny">${isAv?'Avoir':t.tva?'Total TTC':'Total'}</span><b>${isAv?'− ':''}${eur(isInv && d.number ? dueOf(d) : t.ttc)}</b></div>
+      <div class="row" style="flex-wrap:nowrap;gap:6px">${main.map(a=>btn(a,' sm'))}${rest.length>0 && html`<button class="btn sm" aria-label="Plus d’actions" onClick=${()=>open('actions',{title:title, items:rest})}>Plus</button>`}</div>
+    </div>
     <datalist id="evtypes">${EVENT_TYPES.map(x=>html`<option value=${x}/>`)}</datalist>
+  <//>`;
+}
+function ActionsSheet({title, items, onClose}){
+  return html`<${Sheet} compact title=${title} onClose=${onClose}>
+    <div class="list">${items.map(a=>html`<button class="item" disabled=${a.disabled} style=${a.danger?'color:var(--bad)':''} onClick=${()=>{ onClose(); a.run(); }}><div class="grow" style="font-weight:600">${a.label}</div><span class="tiny">›</span></button>`)}</div>
   <//>`;
 }
 function PdfPreview({doc}){
