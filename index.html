@@ -1251,6 +1251,7 @@ function ClientForm({client, onClose, onSaved, defaultKind}){
       <${F} label="Pays" ...${b('country')}/>
       <${F} label="E-mail" type="email" ...${b('email')}/>
       <${F} label="Téléphone" type="tel" ...${b('phone')}/>
+      ${f.lastMailTo && f.lastMailTo!==f.email && html`<div class="full tiny">Factures envoyées en dernier à : <b>${f.lastMailTo}</b> (proposé automatiquement au prochain envoi) <button class="btn ghost sm" style="min-height:0;padding:0 4px" onClick=${()=>setF(x=>({...x,lastMailTo:''}))}>Oublier</button></div>`}
       <${TA} label="Notes (préférences musicales, infos utiles…)" ...${b('notes')}/>
       <${F} label="Mots-clés pour l’agenda (séparés par des virgules)" full ...${b('keywords')} placeholder=${ent?'ex. delicate, deli, le deli':'ex. mariage camille, camille'}/>
       <div class="full tiny">Quand un de ces mots (ou le début du nom du client) apparaît dans le titre d’un événement Google Agenda, Cabine le rattache à ce client et prépare la facture provisoire à partir de sa dernière facture.</div>
@@ -2170,19 +2171,25 @@ function mailTemplate(d){
 }
 function SendSheet({doc, onClose}){
   const c=docClient(doc)||{}; const tpl=mailTemplate(doc);
-  const [f,setF,b]=useForm({to:c.email||'', subject:tpl.subject, text:tpl.text});
+  // adresse proposée : la dernière utilisée pour ce client, sinon celle de sa fiche (version à jour), sinon celle de la facture
+  const live=clientById(doc.clientId)||{};
+  const lastSent=S.docs.filter(x=>x.clientId===doc.clientId && x.sentTo).sort((a,b)=>(b.sentAt||'').localeCompare(a.sentAt||''))[0]?.sentTo;
+  const suggested = live.lastMailTo || lastSent || live.email || c.email || '';
+  const [f,setF,b]=useForm({to:suggested, subject:tpl.subject, text:tpl.text});
   const [busy,setBusy]=useState(false);
   async function send(){
     if(!f.to){ toast('Indiquez l’adresse du destinataire.'); return; }
     setBusy(true);
     try{
-      const f = await documentFile(doc); let bin=''; for(let i=0;i<f.bytes.length;i+=0x8000) bin+=String.fromCharCode.apply(null, f.bytes.subarray(i,i+0x8000));
+      const file = await documentFile(doc); let bin=''; for(let i=0;i<file.bytes.length;i+=0x8000) bin+=String.fromCharCode.apply(null, file.bytes.subarray(i,i+0x8000));
       const base64 = btoa(bin);
       const p=docProfile(doc)||{};
       await gcall('send',{to:f.to, subject:f.subject, text:f.text, fromName:p.tradeName||p.ownerName||'', attachments:[{filename:pdfName(doc), base64}]});
       const cur=S.docs.find(x=>x.id===doc.id)||doc;
       await put('docs',{...cur, sentAt:new Date().toISOString(), sentTo:f.to});
-      if(c.id && !c.email && clientById(c.id)) await put('clients',{...clientById(c.id), email:f.to});
+      // retenir l'adresse utilisée pour les prochains envois (et la mettre sur la fiche si elle n'en avait pas)
+      const lc=clientById(doc.clientId);
+      if(lc){ const to=f.to.trim(); const first=to.split(',')[0].trim(); if(lc.lastMailTo!==to || !lc.email) await put('clients',{...lc, lastMailTo:to, email: lc.email || first}); }
       toast('E-mail envoyé à '+f.to); onClose();
     }catch(e){ toast(e.message==='google_not_connected' ? 'Reconnectez votre compte Google (Plus > Se déconnecter, puis se reconnecter).' : 'Envoi impossible : '+e.message); setBusy(false); }
   }
