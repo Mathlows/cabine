@@ -628,8 +628,9 @@ function facturxIssues(d){
   return out;
 }
 function ciiXml(d, opts={}){
-  let p=docProfile(d)||{}; const c=docClient(d)||{}, t=computeTotals(d,p);
+  let p=docProfile(d)||{}, c=docClient(d)||{}; const t=computeTotals(d,p);
   if(opts.sellerSiren){ p={...p, siren:opts.sellerSiren, siret:'', tvaNumber: tvaFromSiren(opts.sellerSiren)}; }
+  if(opts.buyerSiren){ c={...c, siren:opts.buyerSiren, siret:'', tva: tvaFromSiren(opts.buyerSiren)}; }
   const franchise=!t.tva, ent=c.kind==='entreprise';
   const cat = r => franchise ? 'E' : (Number(r)>0 ? 'S' : 'Z');
   const sellerSiren=sirenOf(p), buyerSiren=ent?sirenOf(c):'';
@@ -801,7 +802,8 @@ async function sendToPA(d, silent){
   try{
     const env = await paEnvironment();
     // bac à sable : la plateforme n'accepte que l'entreprise fictive du compte de test
-    const opts = env.sandbox && env.siren ? {sellerSiren:env.siren} : {};
+    // bac à sable : vendeur = entreprise fictive du compte, client = entreprise fictive de test (000000001)
+    const opts = env.sandbox && env.siren ? {sellerSiren:env.siren, buyerSiren: env.siren==='000000001' ? '000000002' : '000000001'} : {};
     const by = await facturxBytes(cur, opts); let bin=''; for(let i=0;i<by.length;i+=0x8000) bin+=String.fromCharCode.apply(null, by.subarray(i,i+0x8000));
     const r = await pacall('send', {base64:btoa(bin), externalId:env.sandbox ? cur.number+'-TEST-'+Date.now().toString(36) : cur.number});
     const last = (r.events||[]).slice(-1)[0];
