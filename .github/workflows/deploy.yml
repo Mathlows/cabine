@@ -123,6 +123,9 @@ jobs:
             echo "Clés de notification déjà présentes"
           fi
           supabase secrets set --project-ref "$PROJECT_REF" --yes VAPID_SUBJECT="$SITE"
+          # jeton à usage unique pour la notification de test (renouvelé à chaque mise en ligne)
+          TT=$(openssl rand -hex 24); echo "::add-mask::$TT"; echo "TEST_TOKEN=$TT" >> "$GITHUB_ENV"
+          supabase secrets set --project-ref "$PROJECT_REF" --yes REMINDERS_TEST_TOKEN="$TT"
       - name: Déployer les fonctions
         run: |
           supabase functions deploy google --project-ref "$PROJECT_REF" --yes
@@ -144,9 +147,8 @@ jobs:
       - name: Notification de test (à la demande)
         if: ${{ github.event_name == 'workflow_dispatch' && inputs.notif_test }}
         run: |
-          SR=$(curl -sS "https://api.supabase.com/v1/projects/$PROJECT_REF/api-keys?reveal=true" -H "Authorization: Bearer $SUPABASE_ACCESS_TOKEN" | jq -r '[.[] | select(.name=="service_role")][0].api_key // empty')
-          echo "::add-mask::$SR"
-          R=$(curl -sS -m 60 -X POST "https://$PROJECT_REF.supabase.co/functions/v1/reminders" -H "Content-Type: application/json" -H "Authorization: Bearer $SR" -d '{"test":true}')
+          sleep 10
+          R=$(curl -sS -m 60 -X POST "https://$PROJECT_REF.supabase.co/functions/v1/reminders" -H "Content-Type: application/json" -H "x-test-token: $TEST_TOKEN" -d '{"test":true}')
           echo "Résultat du test : $R"
       - name: Connexion avec Google (réglages d'authentification)
         if: env.GOOGLE_CLIENT_ID != ''

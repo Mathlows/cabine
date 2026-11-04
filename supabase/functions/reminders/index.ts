@@ -12,8 +12,8 @@ Deno.serve(async (req) => {
     // test déclenché par la mise en ligne (clé de service uniquement)
     const body = await req.json().catch(() => ({}));
     if (body.test) {
-      const auth = (req.headers.get("Authorization") || "").replace("Bearer ", "");
-      if (!auth || auth !== Deno.env.get("SUPABASE_SERVICE_ROLE_KEY")) return json({ error: "non_autorise" }, 403);
+      const tok = req.headers.get("x-test-token") || "", expected = Deno.env.get("REMINDERS_TEST_TOKEN") || "";
+      if (!expected || tok.length < 32 || tok !== expected) return json({ error: "non_autorise" }, 403);
       const { data: all } = await admin.from("push_subscriptions").select("user_id");
       const out: any[] = [];
       for (const u of [...new Set((all || []).map((s) => s.user_id))]) {
