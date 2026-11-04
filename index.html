@@ -220,7 +220,7 @@ async function initSupabase(cfg){
   sb.channel('bk-'+user.id).on('postgres_changes',{event:'*',schema:'public',table:'booking_requests',filter:'user_id=eq.'+user.id}, loadBookings).subscribe();
   backend.put = async (c,o)=>{ const {id:_i,...body}=o; const {error}=await sb.from('items').upsert({user_id:user.id, col:c, id:o.id, data:clone(body), updated_at:new Date().toISOString()}); if(error) throw error; };
   backend.del = async (c,i)=>{ const {error}=await sb.from('items').delete().match({user_id:user.id, col:c, id:i}); if(error) throw error; };
-  setTimeout(()=>{ pullGoogle(); pullPA(); }, 1500); setInterval(()=>{ pullGoogle(); pullPA(); }, 5*60*1000);
+  setTimeout(()=>{ syncOnOpen(); pullPA(); }, 1500); setInterval(()=>{ pullGoogle(); pullPA(); }, 5*60*1000);
   document.addEventListener('visibilitychange', ()=>{ if(document.visibilityState==='visible'){ pullGoogle(); pullPA(); } });
 }
 async function initStore(){
@@ -301,6 +301,12 @@ function parisParts(str, allDay){
   const p = new Intl.DateTimeFormat('en-GB',{timeZone:'Europe/Paris',year:'numeric',month:'2-digit',day:'2-digit',hour:'2-digit',minute:'2-digit',hourCycle:'h23'}).formatToParts(new Date(str));
   const g=t=>p.find(x=>x.type===t).value; return {date:`${g('year')}-${g('month')}-${g('day')}`, time:`${g('hour')}:${g('minute')}`};
 }
+/* À chaque ouverture : envoie à Google les dates qui n'y sont pas encore, puis récupère les nouveautés. */
+async function syncOnOpen(){
+  if(!googleOn()) return;
+  for(const e of S.events.filter(x=>!x.googleId && x.date>=addDays(todayISO(),-30))) await pushEvent(e);
+  await pullGoogle();
+}
 let pulling=false;
 async function pullGoogle(){
   if(!googleOn() || pulling) return; pulling=true; let created=0;
@@ -321,16 +327,19 @@ async function pullGoogle(){
         }
       } else if(!g.cabineId){
         const isRdv=/^rdv\b/i.test(g.summary); const parts=g.summary.replace(/^rdv\s*[·:-]?\s*/i,'').split(' · ').map(x=>x.trim());
-        const client=S.clients.find(c=>parts.some(x=>x && clientName(c).toLowerCase()===x.toLowerCase()));
-        const place = isRdv ? g.location : (g.location || parts.find(x=>!client || clientName(client).toLowerCase()!==x.toLowerCase()) || g.summary);
-        const ev={id:uid(), kind:isRdv?'rdv':'presta', profileId:activeProfile()?.id||'', clientId:client?.id||'', date:st.date, start:g.allDay?'20:00':st.time, end:g.allDay?'02:00':en.time, eventType:'', location:place||'', notes:g.description||'', googleId:g.googleId, invoiceId:'', fromGoogle:true};
+        const client=S.clients.find(c=>parts.some(x=>x && clientName(c).toLowerCase()===x.toLowerCase())) || matchClient(g.summary+' '+(g.location||''));
+        const rest=parts.filter(x=>x && !(client && matchClient(x)?.id===client.id));
+        const place = isRdv ? g.location : (g.location || (client ? (rest[0] || lastLocationFor(client.id)) : g.summary));
+        const ev={id:uid(), kind:isRdv?'rdv':'presta', profileId:activeProfile()?.id||'', clientId:client?.id||'', date:st.date, start:g.allDay?'20:00':st.time, end:g.allDay?'02:00':en.time, eventType:'', location:place||'', notes:g.description||'', googleId:g.googleId, invoiceId:'', fromGoogle:true, googleTitle:g.summary, googleLocation:g.location||''};
         if(!isRdv){ const inv=draftFromEvent(ev); ev.invoiceId=inv.id; await put('docs',inv); }
         await put('events',ev);
         created++;
       }
     }
-    await saveSettings({lastPull:r.now});
+    const linked=await rematchGoogleEvents();
+    await saveSettings({lastPull:r.now}); backend.lastSync=new Date(); emit();
     if(created) toast(created+(created>1?' dates ajoutées':' date ajoutée')+' depuis Google Agenda');
+    else if(linked) toast(linked+(linked>1?' dates rattachées à leur client':' date rattachée à son client'));
   }catch(err){ console.warn('Google Agenda', err); }
   pulling=false;
 }
@@ -912,7 +921,7 @@ function Sheets(){
   const [stack,setStack]=useState([]);
   useEffect(()=>{ pushSheet = s => setStack(x=>[...x,s]); },[]);
   const close = key => setStack(x=>x.filter(s=>s.key!==key));
-  const C = {yearDetail:YearDetail, send:SendSheet, booking:BookingView, bookingSettings:BookingSettings, client:ClientForm, product:ProductForm, profile:ProfileForm, doc:DocEditor, event:EventForm, confirm:Confirm, clientView:ClientView, picker:ProductPicker};
+  const C = {colors:ColorsSheet, yearDetail:YearDetail, send:SendSheet, booking:BookingView, bookingSettings:BookingSettings, client:ClientForm, product:ProductForm, profile:ProfileForm, doc:DocEditor, event:EventForm, confirm:Confirm, clientView:ClientView, picker:ProductPicker};
   return stack.map(s=>{ const Comp=C[s.kind]; return html`<${Comp} key=${s.key} ...${s.props} onClose=${()=>close(s.key)} />`; });
 }
 
@@ -1000,7 +1009,10 @@ function ClientForm({client, onClose, onSaved, defaultKind}){
   const ent = f.kind==='entreprise';
   async function save(){
     if(ent ? !f.company : !(f.firstName||f.lastName)){ toast(ent?'Indiquez le nom de l’entreprise.':'Indiquez au moins un nom.'); return; }
-    await put('clients', f); toast('Client enregistré'); onSaved && onSaved(f); onClose();
+    await put('clients', f); onSaved && onSaved(f); onClose();
+    // de nouveaux mots-clés peuvent rattacher des dates déjà importées de Google
+    const n = await rematchGoogleEvents();
+    toast(n ? `Client enregistré · ${n} date${n>1?'s':''} rattachée${n>1?'s':''}` : 'Client enregistré');
   }
   return html`<${Sheet} title=${client?'Modifier le client':'Nouveau client'} onClose=${onClose} actions=${html`<button class="btn pri sm" onClick=${save}>Enregistrer</button>`}>
     <div class="seg" role="tablist">${[['particulier','Particulier'],['entreprise','Entreprise']].map(([k,l])=>html`<button class=${f.kind===k?'on':''} onClick=${()=>setF(x=>({...x,kind:k}))}>${l}</button>`)}</div>
@@ -1023,6 +1035,9 @@ function ClientForm({client, onClose, onSaved, defaultKind}){
       <${F} label="E-mail" type="email" ...${b('email')}/>
       <${F} label="Téléphone" type="tel" ...${b('phone')}/>
       <${TA} label="Notes (préférences musicales, infos utiles…)" ...${b('notes')}/>
+      <${F} label="Mots-clés pour l’agenda (séparés par des virgules)" full ...${b('keywords')} placeholder=${ent?'ex. delicate, deli, le deli':'ex. mariage camille, camille'}/>
+      <div class="full tiny">Quand un de ces mots (ou le début du nom du client) apparaît dans le titre d’un événement Google Agenda, Cabine le rattache à ce client et prépare la facture provisoire à partir de sa dernière facture.</div>
+      <div class="full sect"><div class="lab">Couleur dans le calendrier (facultatif)</div><${ColorPick} allowNone value=${f.color||''} onChange=${v=>setF(x=>({...x,color:v}))}/></div>
     </div>
     ${client && html`<button class="btn danger" onClick=${()=>{ if(S.docs.some(d=>d.clientId===client.id && d.number)){ toast('Ce client a des documents numérotés : il doit être conservé.'); return; } open('confirm',{title:'Supprimer ce client ?', text:'Cette action est définitive.', yes:'Supprimer', danger:true, onYes:()=>{ del('clients',client.id); onClose(); }}); }}>Supprimer ce client</button>`}
   <//>`;
@@ -1307,10 +1322,86 @@ function EventForm({event, preset, onClose}){
     <datalist id="evtypes2">${EVENT_TYPES.map(x=>html`<option value=${x}/>`)}</datalist>
   <//>`;
 }
+/* ---------------- reconnaissance des clients dans les titres d'agenda ---------------- */
+const norm = s => (s||'').normalize('NFD').replace(/[̀-ͯ]/g,'').toLowerCase().replace(/[^a-z0-9]+/g,' ').trim();
+// mots trop courants pour identifier un client
+const STOP = new Set(['presta','prestation','prestations','soiree','soirees','dj','mix','set','live','rdv','bar','club','resto','restaurant','les','des','the','avec','pour','chez','fete','event','evenement','mariage','anniversaire','test']);
+const clientTerms = c => [clientName(c), c.company, [c.firstName,c.lastName].filter(Boolean).join(' '), ...String(c.keywords||'').split(/[,;\n]/)]
+  .map(norm).filter(k=>k.length>=3 && !STOP.has(k));
+/* Trouve le client désigné dans un texte (« delicate », « Soirée Delicatessen »…). Renvoie null si aucun ou si deux clients se valent. */
+function matchClient(text){
+  const t=norm(text); if(!t) return null;
+  const words=t.split(' ').filter(w=>w.length>=4 && !STOP.has(w));
+  let best=null, bestScore=0, tie=false;
+  for(const c of S.clients){
+    let score=0;
+    for(const k of clientTerms(c)){
+      if((' '+t+' ').includes(' '+k+' ')) score=Math.max(score, 200+k.length);          // mot-clé ou nom complet présent
+      else if(t.includes(k)) score=Math.max(score, 150+k.length);                       // collé à autre chose
+      else if(t.length>=5 && (' '+k+' ').includes(' '+t+' ')) score=Math.max(score, 140+t.length); // morceau du nom : « espace loisirs »
+      else if(t.length>=5 && k.startsWith(t)) score=Math.max(score, 130+t.length);       // début du nom : « live event »
+      else for(const w of words){ if(k.split(' ').some(kw=>kw.length>=w.length && kw.startsWith(w))) score=Math.max(score, 100+w.length); } // début de mot : « delicate » → delicatessen
+    }
+    if(score>bestScore){ best=c; bestScore=score; tie=false; } else if(score && score===bestScore && c.id!==best?.id) tie=true;
+  }
+  return tie ? null : best;
+}
+function lastLocationFor(clientId){
+  const ev=S.events.filter(e=>e.clientId===clientId && e.location).sort((a,b)=>b.date.localeCompare(a.date))[0];
+  return ev?.location || lastInvoiceForClient(clientId)?.eventLocation || '';
+}
+/* Rattache après coup les dates venues de Google qui n'ont pas encore de client (nouveaux mots-clés, nouveau client…). */
+async function rematchGoogleEvents(){
+  let n=0;
+  for(const e of S.events.filter(x=>x.fromGoogle && !x.clientId)){
+    const c=matchClient((e.googleTitle||e.location||'')+' '+(e.googleLocation||'')); if(!c) continue;
+    const upd={...e, clientId:c.id, location: e.googleLocation || lastLocationFor(c.id) || e.location};
+    await put('events', upd, {noSync:true});
+    const inv=S.docs.find(d=>d.id===e.invoiceId);
+    if(inv && inv.status==='brouillon'){
+      const prev=lastInvoiceForClient(c.id, inv.profileId);
+      const blank=!(inv.lines||[]).some(l=>Number(l.unit)>0);
+      await put('docs', {...inv, clientId:c.id, eventLocation:upd.location, ...(blank && prev ? {lines:refreshLines(prev.lines, e.date, upd.location), remisePct:prev.remisePct||0, notes:prev.notes||'', copiedFrom:prev.number||''} : {})});
+    }
+    n++;
+  }
+  return n;
+}
+/* ---------------- couleurs du calendrier ---------------- */
+const DEFAULT_COLORS = {presta:'#3046c9', rdv:'#c27a00'};
+const calColors = () => ({...DEFAULT_COLORS, ...(settings().colors||{})});
+const eventColor = e => { const c=clientById(e.clientId); const cc=calColors(); return e.kind==='rdv' ? cc.rdv : (c?.color || cc.presta); };
+const overlayColor = e => (settings().colors?.cals||{})[e.calendarId] || e.color || '#8a90a3';
+const SWATCHES = ['#3046c9','#0f7d6c','#16794a','#c27a00','#b5441d','#b3261e','#a1155a','#7a3fb8','#0b6fa4','#4b5563'];
+function ColorPick({value, onChange, allowNone}){
+  return html`<div class="row" style="gap:6px">
+    ${allowNone && html`<button type="button" aria-label="Aucune" onClick=${()=>onChange('')} style=${`width:28px;height:28px;border-radius:50%;border:2px dashed var(--line);background:none;${!value?'outline:2px solid var(--ink);outline-offset:1px':''}`}></button>`}
+    ${SWATCHES.map(c=>html`<button type="button" aria-label=${'Couleur '+c} onClick=${()=>onChange(c)} style=${`width:28px;height:28px;border-radius:50%;border:0;background:${c};${value===c?'outline:2px solid var(--ink);outline-offset:2px':''}`}></button>`)}
+    <label style="display:inline-flex;align-items:center;gap:4px;font-size:.8rem;color:var(--ink-2)">Autre<input type="color" value=${value||'#3046c9'} onInput=${e=>onChange(e.target.value)} style="width:32px;height:28px;border:0;background:none;padding:0"/></label>
+  </div>`;
+}
+function ColorsSheet({onClose}){
+  useStore(); const cc=calColors(); const [cals,setCals]=useState(OV.cals);
+  useEffect(()=>{ if(backend.mode==='supabase') overlayCalendars().then(setCals); },[]);
+  const set=patch=>saveSettings({colors:{...(settings().colors||{}), ...patch}});
+  const ov=(cals||[]).filter(c=>overlayIds().includes(c.id));
+  const clients=S.clients.filter(c=>c.color);
+  return html`<${Sheet} title="Couleurs du calendrier" onClose=${onClose}>
+    <div class="sect"><div class="lab">Prestations DJ</div><${ColorPick} value=${cc.presta} onChange=${v=>set({presta:v})}/></div>
+    <div class="sect"><div class="lab">Rendez-vous clients</div><${ColorPick} value=${cc.rdv} onChange=${v=>set({rdv:v})}/></div>
+    ${ov.map(c=>html`<div class="sect"><div class="lab">Agenda Google « ${c.name} »</div><${ColorPick} allowNone value=${(settings().colors?.cals||{})[c.id]||''} onChange=${v=>set({cals:{...(settings().colors?.cals||{}), [c.id]:v}})}/><div class="tiny">Sans choix : la couleur de Google Agenda.</div></div>`)}
+    <div class="sect"><div class="lab">Par client</div>
+      <div class="tiny">Une couleur propre à un client remplace celle des prestations (fiche du client → « Couleur dans le calendrier »).</div>
+      ${clients.length? html`<div class="list">${clients.map(c=>html`<button class="item" onClick=${()=>open('client',{client:c})}><span style=${`width:12px;height:12px;border-radius:50%;background:${c.color};flex:none`}></span><div class="grow">${clientName(c)}</div><span class="tiny">Modifier</span></button>`)}</div>` : ''}
+    </div>
+    <button class="btn ghost" style="align-self:flex-start" onClick=${()=>saveSettings({colors:{}})}>Revenir aux couleurs d’origine</button>
+  <//>`;
+}
+
 function EventList({events}){
   return html`<div class="list">${events.map(e=>{ const dt=parseISO(e.date); const c=clientById(e.clientId); const inv=S.docs.find(x=>x.id===e.invoiceId);
     return html`<button class="item" onClick=${()=>open('event',{event:e})}>
-      <div class="datechip"><b>${dt.getDate()}</b><span>${MSHORT[dt.getMonth()]}</span></div>
+      <div class="datechip" style=${`box-shadow:inset 3px 0 0 ${eventColor(e)}`}><b>${dt.getDate()}</b><span>${MSHORT[dt.getMonth()]}</span></div>
       <div class="grow"><div class="t">${e.kind==='rdv'?'RDV · ':''}${c?clientName(c):(e.eventType||'Sans client')}</div><div class="tiny">${[e.start&&(e.start+(e.end?'–'+e.end:'')), e.eventType, e.location].filter(Boolean).join(' · ')}</div></div>
       ${inv ? html`<span class=${'pill '+docState(inv).k}>${docState(inv).l}</span>` : (e.kind==='rdv'? html`<span class="pill">RDV</span>`:'')}
     </button>`; })}</div>`;
@@ -1354,7 +1445,7 @@ function overlayByDate(items){
 function OverlayList({items}){
   if(!items?.length) return null;
   return html`<div class="list">${items.map(e=>html`<a class="item" href=${e.link||'#'} target="_blank" rel="noopener" style="text-decoration:none;color:inherit">
-    <span style=${`width:10px;height:10px;border-radius:50%;flex:none;background:${e.color||'var(--ink-3)'}`}></span>
+    <span style=${`width:10px;height:10px;border-radius:50%;flex:none;background:${overlayColor(e)}`}></span>
     <div class="grow"><div class="t" style="font-weight:500">${e.summary}</div><div class="tiny">${e.allDay?'Toute la journée':`${e.startTime}–${e.endTime}`}${e.location?' · '+e.location:''}${e.calName?' · '+e.calName:''}</div></div>
     <span class="tiny">Google</span></a>`)}</div>`;
 }
@@ -1386,14 +1477,14 @@ function AgendaView(){
   useEffect(()=>{ let alive=true; const go=f=>loadOverlay(ovFrom,ovTo,f).then(x=>{ if(alive) setOv(x); }); go(); const t=setInterval(()=>go(true),5*60*1000); return ()=>{ alive=false; clearInterval(t); }; },[ovFrom,ovTo,ovKey]);
   const ovBy=overlayByDate(ovItems);
   return html`<div class="wrap">
-    <div class="row sb"><h1>Agenda</h1><button class="btn pri" onClick=${()=>open('event',{preset:{date:sel}})}>Ajouter une date</button></div>
+    <div class="row sb"><div><h1>Agenda</h1>${googleOn() && html`<div class="tiny">${backend.lastSync?'Synchronisé avec Google à '+backend.lastSync.toLocaleTimeString('fr-FR',{hour:'2-digit',minute:'2-digit'}):'Synchronisation avec Google…'} · <button class="btn ghost sm" style="min-height:0;padding:0 4px" onClick=${async()=>{ await syncOnOpen(); toast('Agenda synchronisé'); }}>Actualiser</button></div>`}</div><button class="btn pri" onClick=${()=>open('event',{preset:{date:sel}})}>Ajouter une date</button></div>
     <div class="card stack">
       <div class="row sb"><button class="btn sm" onClick=${()=>shift(-1)} aria-label="Mois précédent">‹</button><h2 style="text-transform:capitalize">${MONTHS[cur.m]} ${cur.y}</h2><button class="btn sm" onClick=${()=>shift(1)} aria-label="Mois suivant">›</button></div>
       <div class="cal">${['lun','mar','mer','jeu','ven','sam','dim'].map(d=>html`<div class="dow">${d}</div>`)}
         ${days.slice(0,rows).map(d=>{ const k=iso(d); const evs=byDate[k]||[]; return html`<button class=${[d.getMonth()!==cur.m&&'out', k===todayISO()&&'today', k===sel&&'sel'].filter(Boolean).join(' ')} onClick=${()=>setSel(k)} aria-label=${fdateLong(k)}>
-          <span>${d.getDate()}</span><span class="dots">${evs.slice(0,3).map(e=>html`<i class=${e.kind==='rdv'?'rdv':''}></i>`)}${(ovBy[k]||[]).slice(0,Math.max(0,4-Math.min(3,evs.length))).map(e=>html`<i class="ext" style=${e.color?`background:${e.color}`:''}></i>`)}</span></button>`; })}
+          <span>${d.getDate()}</span><span class="dots">${evs.slice(0,3).map(e=>html`<i style=${`background:${eventColor(e)}`}></i>`)}${(ovBy[k]||[]).slice(0,Math.max(0,4-Math.min(3,evs.length))).map(e=>html`<i class="ext" style=${`background:${overlayColor(e)}`}></i>`)}</span></button>`; })}
       </div>
-      <div class="row tiny"><span class="row" style="gap:4px"><i style="width:8px;height:8px;border-radius:50%;background:var(--accent);display:inline-block"></i>Prestation</span><span class="row" style="gap:4px"><i style="width:8px;height:8px;border-radius:50%;background:var(--warn);display:inline-block"></i>Rendez-vous</span>${ovKey && html`<span class="row" style="gap:4px"><i style="width:8px;height:8px;border-radius:50%;background:var(--ink-3);display:inline-block"></i>Autres agendas</span>`}</div>
+      <div class="row sb tiny"><div class="row" style="gap:10px"><span class="row" style="gap:4px"><i style=${`width:8px;height:8px;border-radius:50%;background:${calColors().presta};display:inline-block`}></i>Prestation</span><span class="row" style="gap:4px"><i style=${`width:8px;height:8px;border-radius:50%;background:${calColors().rdv};display:inline-block`}></i>Rendez-vous</span>${ovKey && html`<span class="row" style="gap:4px"><i style="width:8px;height:8px;border-radius:50%;background:var(--ink-3);display:inline-block"></i>Autres agendas</span>`}</div><button class="btn ghost sm" onClick=${()=>open('colors')}>Couleurs</button></div>
     </div>
     <div class="sect"><div class="lab" style="text-transform:none;letter-spacing:0;font-size:.95rem;color:var(--ink)">${fdateLong(sel)}</div>
       ${selEvents.length ? html`<${EventList} events=${selEvents}/>` : (ovBy[sel]?.length ? '' : html`<div class="muted small">Rien de prévu ce jour-là.</div>`)}
