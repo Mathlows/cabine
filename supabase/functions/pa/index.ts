@@ -42,7 +42,7 @@ Deno.serve(async (req) => {
     switch (body.action) {
       case "status": {
         const me = await call("GET", "/companies/me");
-        return json({ ok: true, sandbox: /sandbox|test/i.test(API) || !!me?.sandbox, company: { name: me?.formal_name || me?.trade_name || me?.name || "", id: me?.id ?? null, siren: me?.identifier || me?.siren || "" } });
+        return json({ ok: true, env: me?.env || "", sandbox: me?.env === "sandbox", company: { name: me?.trade_name || me?.formal_name || "", id: me?.id ?? null, siren: me?.number || "" } });
       }
       case "send": {
         // Dépôt du Factur-X (PDF/A-3 avec XML CII intégré)
