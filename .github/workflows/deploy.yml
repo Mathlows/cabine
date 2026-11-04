@@ -23,6 +23,7 @@ env:
   SUPERPDP_CLIENT_ID: ${{ secrets.SUPERPDP_CLIENT_ID }}
   SUPERPDP_CLIENT_SECRET: ${{ secrets.SUPERPDP_CLIENT_SECRET }}
   SUPERPDP_API_URL: ${{ vars.SUPERPDP_API_URL }}
+  SUPERPDP_AUTH_URL: ${{ vars.SUPERPDP_AUTH_URL }}
 
 jobs:
   backend:
@@ -55,7 +56,7 @@ jobs:
         if: env.SUPERPDP_CLIENT_ID != ''
         run: |
           supabase secrets set --project-ref "$PROJECT_REF" --yes SUPERPDP_CLIENT_ID="$SUPERPDP_CLIENT_ID" SUPERPDP_CLIENT_SECRET="$SUPERPDP_CLIENT_SECRET"
-          if [ -n "$SUPERPDP_API_URL" ]; then supabase secrets set --project-ref "$PROJECT_REF" --yes SUPERPDP_API_URL="$SUPERPDP_API_URL"; fi
+          supabase secrets set --project-ref "$PROJECT_REF" --yes SUPERPDP_API_URL="${SUPERPDP_API_URL:-https://api.superpdp.tech/v1.beta}" SUPERPDP_AUTH_URL="${SUPERPDP_AUTH_URL:-https://api.superpdp.tech/oauth2/token}"
       - name: Tester la connexion à la plateforme (sans afficher de données)
         if: env.SUPERPDP_CLIENT_ID != ''
         run: |
@@ -65,7 +66,7 @@ jobs:
           [ "$CID" != "$SUPERPDP_CLIENT_ID" ] && echo "Note : l'identifiant contenait des espaces ou retours à la ligne"
           [ "$CSE" != "$SUPERPDP_CLIENT_SECRET" ] && echo "Note : le secret contenait des espaces ou retours à la ligne"
           echo "Longueurs : identifiant ${#CID} caractères, secret ${#CSE} caractères"
-          URL=https://api.superpdp.tech/oauth2/token
+          URL=${SUPERPDP_AUTH_URL:-https://api.superpdp.tech/oauth2/token}; echo "Adresse de connexion : $URL"
           A=$(curl -sS -o /tmp/a.json -w "%{http_code}" -X POST $URL -H "Content-Type: application/x-www-form-urlencoded" --data-urlencode grant_type=client_credentials --data-urlencode "client_id=$CID" --data-urlencode "client_secret=$CSE")
           echo "Méthode 1 (identifiants dans le formulaire) : HTTP $A — motif : $(jq -r '.error // empty' /tmp/a.json 2>/dev/null) $(jq -r '.error_description // empty' /tmp/a.json 2>/dev/null | cut -c1-120)"
           B=$(curl -sS -o /tmp/b.json -w "%{http_code}" -X POST $URL -u "$CID:$CSE" -H "Content-Type: application/x-www-form-urlencoded" --data-urlencode grant_type=client_credentials)
