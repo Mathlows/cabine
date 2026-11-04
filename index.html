@@ -122,6 +122,10 @@ label.f textarea{min-height:76px;resize:vertical}
 .cal .ev{display:block;width:100%;min-width:0;text-align:left;font:inherit;font-size:.7rem;line-height:1.3;padding:1px 4px;border-radius:4px;border:0;border-left:3px solid var(--c);background:color-mix(in srgb,var(--c) 18%,var(--surface));color:var(--ink);white-space:nowrap;overflow:hidden;text-overflow:ellipsis;text-decoration:none;cursor:pointer}
 .cal .ev:hover{background:color-mix(in srgb,var(--c) 30%,var(--surface))}
 .cal .ev.ext{color:var(--ink-2);background:color-mix(in srgb,var(--c) 10%,var(--surface))}
+.legend{display:flex;flex-wrap:wrap;align-items:center;gap:4px 6px}
+.legend .leg{display:inline-flex;align-items:center;gap:5px;border:1px solid var(--line);background:var(--surface);border-radius:999px;padding:3px 9px 3px 5px;font:inherit;font-size:.75rem;color:var(--ink-2);cursor:pointer}
+.legend .leg:hover{border-color:var(--ink-3);color:var(--ink)}
+.legend .leg i{width:12px;height:12px;border-radius:50%;display:inline-block;box-shadow:0 0 0 2px var(--surface),0 0 0 3px var(--line)}
 .cal .more{font-size:.65rem;color:var(--ink-2);padding-left:4px}
 @media (min-width:700px){.cal .cell{min-height:100px;padding:4px}}
 @media (max-width:520px){.cal{gap:2px}.cal .cell{padding:2px 1px;min-height:64px;border-radius:6px}.cal .num{font-size:.72rem;height:18px;min-width:18px}.cal .ev{font-size:.56rem;letter-spacing:-.02em;padding:1px 1px 1px 2px;border-left-width:2px;border-radius:3px;text-overflow:clip}}
@@ -923,7 +927,7 @@ function Sheets(){
   const [stack,setStack]=useState([]);
   useEffect(()=>{ pushSheet = s => setStack(x=>[...x,s]); },[]);
   const close = key => setStack(x=>x.filter(s=>s.key!==key));
-  const C = {dups:DuplicatesSheet, colors:ColorsSheet, yearDetail:YearDetail, send:SendSheet, booking:BookingView, bookingSettings:BookingSettings, client:ClientForm, product:ProductForm, profile:ProfileForm, doc:DocEditor, event:EventForm, confirm:Confirm, clientView:ClientView, picker:ProductPicker};
+  const C = {colorOne:ColorOne, dups:DuplicatesSheet, colors:ColorsSheet, yearDetail:YearDetail, send:SendSheet, booking:BookingView, bookingSettings:BookingSettings, client:ClientForm, product:ProductForm, profile:ProfileForm, doc:DocEditor, event:EventForm, confirm:Confirm, clientView:ClientView, picker:ProductPicker};
   return stack.map(s=>{ const Comp=C[s.kind]; return html`<${Comp} key=${s.key} ...${s.props} onClose=${()=>close(s.key)} />`; });
 }
 
@@ -1387,6 +1391,17 @@ function ColorPick({value, onChange, allowNone}){
     <label style="display:inline-flex;align-items:center;gap:4px;font-size:.8rem;color:var(--ink-2)">Autre<input type="color" value=${value||'#3046c9'} onInput=${e=>onChange(e.target.value)} style="width:32px;height:28px;border:0;background:none;padding:0"/></label>
   </div>`;
 }
+function ColorOne({kind, calId, name, onClose}){
+  useStore(); const cc=calColors(); const cur=settings().colors||{};
+  const value = kind==='cal' ? (cur.cals||{})[calId]||'' : cc[kind];
+  const set = v => saveSettings({colors: kind==='cal' ? {...cur, cals:{...(cur.cals||{}), [calId]:v}} : {...cur, [kind]:v}});
+  const title = kind==='presta' ? 'Couleur des prestations' : kind==='rdv' ? 'Couleur des rendez-vous' : `Couleur de « ${name} »`;
+  return html`<${Sheet} title=${title} onClose=${onClose} actions=${html`<button class="btn pri sm" onClick=${onClose}>OK</button>`}>
+    <${ColorPick} allowNone=${kind==='cal'} value=${value} onChange=${v=>set(v)}/>
+    ${kind==='cal' && html`<div class="tiny">Sans choix : la couleur de Google Agenda.</div>`}
+    ${kind==='presta' && html`<div class="tiny">Un client peut avoir sa propre couleur : dans sa fiche, « Couleur dans le calendrier ». <button class="btn ghost sm" onClick=${()=>open('colors')}>Voir toutes les couleurs</button></div>`}
+  <//>`;
+}
 function ColorsSheet({onClose}){
   useStore(); const cc=calColors(); const [cals,setCals]=useState(OV.cals);
   useEffect(()=>{ if(backend.mode==='supabase') overlayCalendars().then(setCals); },[]);
@@ -1542,6 +1557,8 @@ function AgendaView(){
   const ovFrom=iso(days[0]), ovTo=iso(days[rows-1]), ovKey=overlayIds().join(',');
   useEffect(()=>{ let alive=true; const go=f=>loadOverlay(ovFrom,ovTo,f).then(x=>{ if(alive) setOv(x); }); go(); const t=setInterval(()=>go(true),5*60*1000); return ()=>{ alive=false; clearInterval(t); }; },[ovFrom,ovTo,ovKey]);
   const ovBy=overlayByDate(ovItems);
+  const [legendCals,setLegendCals]=useState([]);
+  useEffect(()=>{ if(backend.mode==='supabase' && ovKey) overlayCalendars().then(cs=>setLegendCals(cs.filter(c=>overlayIds().includes(c.id)))); else setLegendCals([]); },[ovKey]);
   const [wide,setWide]=useState(()=>window.innerWidth>=700);
   useEffect(()=>{ const f=()=>setWide(window.innerWidth>=700); addEventListener('resize',f); return ()=>removeEventListener('resize',f); },[]);
   return html`<div class="wrap">
@@ -1559,7 +1576,11 @@ function AgendaView(){
             ${all.length>shown.length && html`<span class="more">+${all.length-shown.length}</span>`}
           </div>`; })}
       </div>
-      <div class="row sb tiny"><div class="row" style="gap:10px"><span class="row" style="gap:4px"><i style=${`width:8px;height:8px;border-radius:50%;background:${calColors().presta};display:inline-block`}></i>Prestation</span><span class="row" style="gap:4px"><i style=${`width:8px;height:8px;border-radius:50%;background:${calColors().rdv};display:inline-block`}></i>Rendez-vous</span>${ovKey && html`<span class="row" style="gap:4px"><i style="width:8px;height:8px;border-radius:50%;background:var(--ink-3);display:inline-block"></i>Autres agendas</span>`}</div><button class="btn ghost sm" onClick=${()=>open('colors')}>Couleurs</button></div>
+      <div class="legend tiny">
+        <button class="leg" onClick=${()=>open('colorOne',{kind:'presta'})} title="Changer la couleur"><i style=${`background:${calColors().presta}`}></i>Prestation</button>
+        <button class="leg" onClick=${()=>open('colorOne',{kind:'rdv'})} title="Changer la couleur"><i style=${`background:${calColors().rdv}`}></i>Rendez-vous</button>
+        ${legendCals.map(c=>html`<button class="leg" onClick=${()=>open('colorOne',{kind:'cal', calId:c.id, name:c.name})} title="Changer la couleur"><i style=${`background:${(settings().colors?.cals||{})[c.id]||c.color||'#8a90a3'}`}></i>${c.name}</button>`)}
+        <span class="muted" style="font-size:.7rem">Touchez une pastille pour changer sa couleur</span></div>
     </div>
     <div class="sect"><div class="lab" style="text-transform:none;letter-spacing:0;font-size:.95rem;color:var(--ink)">${fdateLong(sel)}</div>
       ${selEvents.length ? html`<${EventList} events=${selEvents}/>` : (ovBy[sel]?.length ? '' : html`<div class="muted small">Rien de prévu ce jour-là.</div>`)}
