@@ -57,7 +57,7 @@ button{cursor:pointer}
 .grid2{display:grid;grid-template-columns:repeat(auto-fit,minmax(min(100%,240px),1fr));gap:12px}
 .stats{display:grid;grid-template-columns:repeat(auto-fit,minmax(min(100%,160px),1fr));gap:12px}
 .stat .lab{font-size:.75rem;text-transform:uppercase;letter-spacing:.06em;color:var(--ink-2)}
-.stat .val{font-family:var(--f-display);font-size:1.5rem;font-weight:700;margin-top:2px}
+.stat .val{font-family:var(--f-display);font-size:clamp(1.05rem,5.2vw,1.5rem);font-weight:700;margin-top:2px;white-space:nowrap}
 .stat .sub{font-size:.8rem;color:var(--ink-3)}
 .meter{height:8px;border-radius:4px;background:var(--surface-2);overflow:hidden;margin-top:8px}
 .meter i{display:block;height:100%;background:var(--accent)}
@@ -321,7 +321,7 @@ async function pullGoogle(){
     for(const g of r.items||[]){
       const local = S.events.find(e=>e.googleId===g.googleId || (g.cabineId && e.id===g.cabineId));
       if(g.status==='cancelled'){
-        if(local){ const inv=S.docs.find(d=>d.id===local.invoiceId); if(inv && inv.status==='brouillon') await del('docs',inv.id); await del('events',local.id,{noSync:true}); }
+        if(local){ await detachEventInvoice(local); await del('events',local.id,{noSync:true}); }
         continue;
       }
       const st=parisParts(g.start,g.allDay), en=parisParts(g.end,g.allDay);
@@ -329,7 +329,7 @@ async function pullGoogle(){
         const upd={...local, googleId:g.googleId, date:st.date, start:g.allDay?local.start:st.time, end:g.allDay?local.end:en.time};
         if(upd.date!==local.date || upd.start!==local.start || upd.end!==local.end || upd.googleId!==local.googleId){
           await put('events',upd,{noSync:true});
-          const inv=S.docs.find(d=>d.id===local.invoiceId); if(inv && inv.status==='brouillon' && upd.date!==local.date) await put('docs',{...inv, eventDate:upd.date});
+          const inv=S.docs.find(d=>d.id===local.invoiceId); if(inv && inv.status==='brouillon' && upd.date!==local.date){ if(inv.monthly){ await detachEventInvoice(local); const re=await attachEventInvoice({...upd, invoiceId:''}); await put('events',re,{noSync:true}); } else await put('docs',{...inv, eventDate:upd.date}); }
         }
       } else if(!g.cabineId){
         const isRdv=/^rdv\b/i.test(g.summary); const parts=g.summary.replace(/^rdv\s*[·:-]?\s*/i,'').split(' · ').map(x=>x.trim());
@@ -382,11 +382,23 @@ function computeTotals(d, p){
   const ttc = r2(ht+vat); const deposit=r2(d.deposit||0);
   return {ht, gross, pct, remise, vats, vat, ttc, deposit, due:r2(ttc-deposit), tva};
 }
+const DOC_LABEL = {facture:'Facture', devis:'Devis', avoir:'Avoir'};
+/* Montant TTC déjà crédité par des avoirs émis sur une facture */
+function creditedAmount(inv){ return r2(S.docs.filter(a=>a.type==='avoir' && a.number && a.creditOf===inv.id && a.status!=='annulee').reduce((s,a)=>s+computeTotals(a,docProfile(a)).ttc,0)); }
+const fullyCredited = inv => inv.type==='facture' && inv.number && creditedAmount(inv) >= computeTotals(inv,docProfile(inv)).ttc - 0.005;
+/* Reste dû sur une facture, avoirs déduits */
+const dueOf = inv => r2(Math.max(0, computeTotals(inv,docProfile(inv)).due - creditedAmount(inv)));
 function docState(d){
+  if(d.type==='avoir'){
+    if(d.status==='brouillon') return {k:'draft',l:'Brouillon'};
+    if(d.status==='annulee') return {k:'',l:'Annulé'};
+    return {k:'paid',l:'Avoir émis'};
+  }
   if(d.type==='facture'){
     if(d.status==='brouillon') return {k:'draft',l:'Brouillon'};
-    if(d.status==='payee') return {k:'paid',l:'Payée'};
     if(d.status==='annulee') return {k:'',l:'Annulée'};
+    if(fullyCredited(d)) return {k:'',l:'Annulée par avoir'};
+    if(d.status==='payee') return {k:'paid',l:'Payée'};
     if(d.dueDate && d.dueDate < todayISO()) return {k:'late',l:'En retard'};
     return {k:'due',l:'À encaisser'};
   }
@@ -397,7 +409,18 @@ function docState(d){
   return {k:'due',l:'Envoyé'};
 }
 function lineTotal(l){ const g=(Number(l.qty)||0)*(Number(l.unit)||0); const ds=Number(l.disc)||0; return r2(l.discKind==='€' ? g-ds : g*(1-ds/100)); }
-function numberFormatOf(p,type){ return type==='facture' ? (p?.numberFormat || `${p?.invoicePrefix||'F'}-{AAAA}-{NNNN}`) : (p?.quoteFormat || `${p?.quotePrefix||'D'}-{AAAA}-{NNNN}`); }
+function numberFormatOf(p,type){
+  if(type==='avoir'){ if(p?.creditFormat) return p.creditFormat; const f=p?.numberFormat || `${p?.invoicePrefix||'F'}-{AAAA}-{NNNN}`; return /^[A-Za-z]+/.test(f) ? f.replace(/^[A-Za-z]+/,'A') : 'A-'+f; }
+  return type==='facture' ? (p?.numberFormat || `${p?.invoicePrefix||'F'}-{AAAA}-{NNNN}`) : (p?.quoteFormat || `${p?.quotePrefix||'D'}-{AAAA}-{NNNN}`);
+}
+/* Prépare un avoir (brouillon) sur une facture numérotée : total par défaut, modifiable pour un avoir partiel. */
+function newAvoir(inv){
+  const restant = r2(computeTotals(inv,docProfile(inv)).ttc - creditedAmount(inv));
+  const total = restant >= computeTotals(inv,docProfile(inv)).ttc - 0.005;
+  return newDoc('avoir', {profileId:inv.profileId, clientId:inv.clientId, creditOf:inv.id, creditOfNumber:inv.number, creditOfDate:inv.issueDate,
+    lines: total ? clone(inv.lines||[]).map(l=>({...l, id:uid()})) : [{id:uid(), title:'Avoir partiel sur la facture '+inv.number, description:'', qty:1, unit:restant, vat:0, disc:0, discKind:'%'}],
+    remisePct: total ? (inv.remisePct||0) : 0, eventDate:inv.eventDate||'', eventLocation:inv.eventLocation||'', eventType:inv.eventType||'', reason:''});
+}
 function periodOf(fmt,date){ return fmt.includes('{MM}') ? date.slice(0,7) : date.slice(0,4); }
 function fmtNumber(fmt,date,seq){ const y=date.slice(0,4), m=date.slice(5,7); return fmt.replace('{AAAA}',y).replace('{AA}',y.slice(2)).replace('{MM}',m).replace(/\{(N+)\}/,(_,n)=>String(seq).padStart(n.length,'0')); }
 function nextNumber(d){
@@ -444,9 +467,95 @@ function lastInvoiceForClient(clientId, profileId){
 }
 function draftFromEvent(ev){
   const p = S.profiles.find(x=>x.id===ev.profileId) || activeProfile();
+  const mc = ev.clientId && ev.kind!=='rdv' ? clientById(ev.clientId) : null;
+  if(mc?.monthlyBilling){
+    // client facturé au mois : la date rejoint la facture provisoire de son mois
+    const m=monthKey(ev.date), prevM=lastInvoiceForClient(mc.id, p?.id);
+    const dr=monthlyDraftFor(mc.id, m) || newDoc('facture',{profileId:p?.id||'', clientId:mc.id, monthly:true, billingMonth:m, lines:[], notes:prevM?.notes||'', remisePct:prevM?.remisePct||0});
+    return addEventToMonthly(dr, ev, lineTemplate(null, mc.id, p?.id));
+  }
   const prev = ev.clientId ? lastInvoiceForClient(ev.clientId, p?.id) : null;
   const lines = prev ? refreshLines(prev.lines, ev.date, ev.location) : [{id:uid(), title:`Prestation DJ${ev.eventType?' – '+ev.eventType:''}`, description:'', qty:1, unit:0, vat: vatOn(p)?20:0}];
   return newDoc('facture', {profileId:p?.id||'', clientId:ev.clientId||'', eventId:ev.id, eventDate:ev.date, eventType:ev.eventType||'', eventLocation:ev.location||'', lines, notes: prev?.notes||'', remisePct: prev?.remisePct||0, copiedFrom: prev?.number||''});
+}
+
+/* ---------------- facturation mensuelle : toutes les dates du mois sur une seule facture ---------------- */
+const monthKey = date => (date||'').slice(0,7);
+const monthLabel = m => m ? MONTHS[Number(m.slice(5,7))-1]+' '+m.slice(0,4) : '';
+const baseTitle = t => String(t||'').replace(DATE_RE,'').replace(/\b\d{1,2}\/\d{1,2}\b/g,'').replace(/\s{2,}/g,' ').replace(/[\s:·,–-]+$/,'').trim();
+function monthlyDraftFor(clientId, month){ return S.docs.find(d=>d.type==='facture' && d.status==='brouillon' && d.monthly && d.clientId===clientId && d.billingMonth===month); }
+/* Ligne type d'une prestation : la première ligne d'une facture (sans ses dates) */
+function lineTemplate(inv, fallbackClientId, profileId){
+  const src = inv?.lines?.[0] && Number(inv.lines[0].unit)>0 ? inv : lastInvoiceForClient(fallbackClientId, profileId);
+  const l = src?.lines?.[0];
+  if(!l) return {title:'Prestation DJ', unit:0, vat:0, qunit:'', disc:0, discKind:'%', qty:1};
+  const dates=((l.title||'')+'\n'+(l.description||'')).match(DATE_RE)||[];
+  const perEvent = dates.length>1 && Number(l.qty)===dates.length ? 1 : (dates.length ? 1 : (Number(l.qty)||1));
+  return {title:baseTitle(l.title)||'Prestation DJ', unit:Number(l.unit)||0, vat:Number(l.vat)||0, qunit:l.qunit||'', disc:Number(l.disc)||0, discKind:l.discKind||'%', qty:perEvent};
+}
+function renderMonthlyLine(l){
+  const evs=(l.events||[]).slice().sort((a,b)=>a.date.localeCompare(b.date));
+  const places=new Set(evs.map(e=>e.place||''));
+  return {...l, qty: evs.reduce((s,e)=>s+(Number(e.qty)||1),0), description: evs.map(e=>shortDate(e.date)+(places.size>1 && e.place?' – '+e.place:'')).join('\n')};
+}
+function finishMonthly(dr){
+  const evs=(dr.lines||[]).flatMap(l=>l.events||[]).sort((a,b)=>a.date.localeCompare(b.date));
+  const places=[...new Set(evs.map(e=>e.place||'').filter(Boolean))];
+  return {...dr, eventDate: evs.length ? evs[evs.length-1].date : '', eventLocation: places.length===1 ? places[0] : '', monthCount: new Set(evs.map(e=>e.id)).size};
+}
+function addEventToMonthly(dr, ev, tpl){
+  let lines=clone(dr.lines||[]).map(l=>l.monthlyKey?{...l, events:(l.events||[]).filter(e=>e.id!==ev.id)}:l);
+  const key=norm(tpl.title)+'|'+tpl.unit+'|'+tpl.vat;
+  let l=lines.find(x=>x.monthlyKey===key);
+  if(!l){ l={id:uid(), title:tpl.title, unit:tpl.unit, vat:tpl.vat, qunit:tpl.qunit, disc:tpl.disc, discKind:tpl.discKind, monthlyKey:key, events:[]}; lines.push(l); }
+  l.events.push({id:ev.id, date:ev.date, qty:tpl.qty||1, place:ev.location||''});
+  lines=lines.filter(x=>!x.monthlyKey || x.events.length).map(x=>x.monthlyKey?renderMonthlyLine(x):x);
+  return finishMonthly({...dr, lines});
+}
+function removeEventFromMonthly(dr, evId){
+  const lines=clone(dr.lines||[]).map(l=>l.monthlyKey?{...l, events:(l.events||[]).filter(e=>e.id!==evId)}:l).filter(l=>!l.monthlyKey || l.events.length).map(l=>l.monthlyKey?renderMonthlyLine(l):l);
+  return finishMonthly({...dr, lines});
+}
+/* Une date quitte sa facture provisoire (suppression, changement de mois ou de client) */
+async function detachEventInvoice(ev){
+  const inv=S.docs.find(d=>d.id===ev.invoiceId); if(!inv || inv.number) return;
+  if(inv.monthly){ const upd=removeEventFromMonthly(inv, ev.id); if(upd.monthCount) await put('docs',upd); else await del('docs',inv.id); }
+  else await del('docs',inv.id);
+}
+/* Rattache une date à la bonne facture provisoire et renvoie la date mise à jour */
+async function attachEventInvoice(ev){
+  const inv=draftFromEvent(ev); await put('docs',inv); return {...ev, invoiceId:inv.id};
+}
+function MonthBillSheet({clientId, onClose}){
+  useStore(); const c=clientById(clientId);
+  const months=[...new Set(S.events.filter(e=>e.clientId===clientId && e.kind!=='rdv').map(e=>monthKey(e.date)))].sort();
+  const pending=months.filter(m=>S.events.some(e=>e.clientId===clientId && e.kind!=='rdv' && monthKey(e.date)===m && !S.docs.find(d=>d.id===e.invoiceId)?.number));
+  const [month,setMonth]=useState(()=>pending.filter(m=>m<=monthKey(todayISO())).pop() || pending[0] || monthKey(todayISO()));
+  const [auto,setAuto]=useState(c?.monthlyBilling ?? true); const [busy,setBusy]=useState(false);
+  const evs=S.events.filter(e=>e.clientId===clientId && e.kind!=='rdv' && monthKey(e.date)===month).sort((a,b)=>a.date.localeCompare(b.date));
+  const info=e=>{ const inv=S.docs.find(d=>d.id===e.invoiceId); if(inv?.number) return {ok:false, l:'déjà facturée ('+inv.number+')'}; if(inv?.monthly) return {ok:false, l:'déjà dans la facture du mois'}; if(inv) return {ok:true, l:'facture provisoire '+eur(computeTotals(inv,docProfile(inv)).ttc)}; return {ok:true, l:'sans facture'}; };
+  const [sel,setSel]=useState({}); const isSel=e=>sel[e.id]!==false;
+  const chosen=evs.filter(e=>info(e).ok && isSel(e));
+  const shift=n=>{ const d=new Date(Number(month.slice(0,4)), Number(month.slice(5,7))-1+n, 1); setMonth(iso(d).slice(0,7)); setSel({}); };
+  async function go(){
+    if(!chosen.length) return; setBusy(true);
+    const prev=lastInvoiceForClient(clientId);
+    let dr=monthlyDraftFor(clientId, month) || newDoc('facture',{profileId:chosen[0].profileId||activeProfile()?.id||'', clientId, monthly:true, billingMonth:month, lines:[], notes:prev?.notes||'', remisePct:prev?.remisePct||0});
+    for(const e of chosen){ const own=S.docs.find(d=>d.id===e.invoiceId && !d.number && !d.monthly); dr=addEventToMonthly(dr, e, lineTemplate(own, clientId, dr.profileId)); if(own) await del('docs', own.id); }
+    await put('docs', dr);
+    for(const e of chosen) await put('events', {...S.events.find(x=>x.id===e.id), invoiceId:dr.id}, {noSync:true});
+    if(auto!==!!c.monthlyBilling) await put('clients', {...c, monthlyBilling:auto});
+    toast(`Facture de ${monthLabel(month)} préparée : ${chosen.length} date${chosen.length>1?'s':''}`); onClose(); open('doc',{doc:S.docs.find(d=>d.id===dr.id)||dr});
+  }
+  return html`<${Sheet} title=${'Facturer le mois · '+clientName(c)} onClose=${onClose} actions=${html`<button class="btn pri sm" disabled=${busy||!chosen.length} onClick=${go}>Préparer la facture</button>`}>
+    <div class="row sb"><button class="btn sm" onClick=${()=>shift(-1)} aria-label="Mois précédent">‹</button><h2 style="text-transform:capitalize">${monthLabel(month)}</h2><button class="btn sm" onClick=${()=>shift(1)} aria-label="Mois suivant">›</button></div>
+    ${evs.length ? html`<div class="list">${evs.map(e=>{ const i=info(e); return html`<label class="item" style=${i.ok?'cursor:pointer':'opacity:.6'}><input type="checkbox" disabled=${!i.ok} checked=${i.ok && isSel(e)} onChange=${x=>setSel(s=>({...s,[e.id]:x.target.checked}))} style="width:18px;height:18px;accent-color:var(--accent)"/>
+      <div class="datechip" style=${`box-shadow:inset 3px 0 0 ${eventColor(e)}`}><b>${parseISO(e.date).getDate()}</b><span>${MSHORT[parseISO(e.date).getMonth()]}</span></div>
+      <div class="grow"><div class="t">${e.location||evLabel(e)}${e.start?' · '+e.start:''}</div><div class="tiny">${i.l}</div></div></label>`; })}</div>`
+      : html`<div class="card empty"><h3>Aucune date en ${monthLabel(month)}</h3><p>Changez de mois avec les flèches.</p></div>`}
+    ${chosen.length>0 && html`<div class="notice small">Les ${chosen.length} date${chosen.length>1?'s':''} cochée${chosen.length>1?'s':''} seront regroupées sur une seule facture provisoire, une ligne par tarif avec la liste des dates. Leurs factures provisoires séparées seront remplacées.</div>`}
+    <label class="check"><input type="checkbox" checked=${auto} onChange=${e=>setAuto(e.target.checked)}/><span>Désormais, regrouper automatiquement les dates de ${clientName(c)} chaque mois<br/><span class="tiny">Chaque nouvelle date (Cabine ou Google Agenda) s’ajoutera à la facture provisoire de son mois.</span></span></label>
+  <//>`;
 }
 
 /* ---------------- recherche entreprise (annuaire officiel) ---------------- */
@@ -473,8 +582,8 @@ function pdfFor(d, opts){
   const p = docProfile(d) || {}; const c = docClient(d) || {}; const t = computeTotals(d,p);
   const W=210, H=297, M=16; const ink=[21,26,43], grey=[105,111,130], soft=[244,245,248];
   const color = hexToRgb(p.color||'#3046c9');
-  const isInv = d.type==='facture'; const draft = d.status==='brouillon';
-  const docLabel = (isInv?'Facture':'Devis') + (d.number ? ' '+d.number : ' (brouillon)');
+  const isInv = d.type==='facture', isAv = d.type==='avoir'; const draft = d.status==='brouillon';
+  const docLabel = (DOC_LABEL[d.type]||'Facture') + (d.number ? ' '+d.number : ' (brouillon)');
   const micro = p.status==='micro'||p.status==='ei';
   let y=M;
   // en-tête
@@ -484,7 +593,8 @@ function pdfFor(d, opts){
   pdf.setTextColor(...ink); pdf.setFont(FN,'normal'); pdf.setFontSize(10);
   const sub=[]; if(d.issueDate) sub.push(parseISO(d.issueDate).toLocaleDateString('fr-FR',{day:'2-digit',month:'long',year:'numeric'}));
   if(draft) sub.push(isInv?'Brouillon – le numéro sera attribué à la finalisation':'Brouillon');
-  if(!isInv && d.validUntil) sub.push('Valable jusqu’au '+fdate(d.validUntil));
+  if(!isInv && !isAv && d.validUntil) sub.push('Valable jusqu’au '+fdate(d.validUntil));
+  if(isAv && d.creditOfNumber) sub.push(`Avoir sur la facture ${d.creditOfNumber}${d.creditOfDate?' du '+fdate(d.creditOfDate):''}`);
   pdf.text(sub, M, y+12);
   y += 12 + sub.length*4.6 + 6;
   // émetteur / destinataire
@@ -525,7 +635,7 @@ function pdfFor(d, opts){
   y = Math.max(yA,yB) + 5;
   // prestation
   if(d.eventDate || d.eventType || d.eventLocation){
-    const pl=[]; if(d.eventDate) pl.push('Date : '+fdateLong(d.eventDate)); if(d.eventType) pl.push(d.eventType); if(d.eventLocation) pl.push('Lieu : '+d.eventLocation);
+    const pl=[]; if(d.monthly) pl.push(`Prestations de ${monthLabel(d.billingMonth)} (${d.monthCount||0} date${(d.monthCount||0)>1?'s':''})`); else if(d.eventDate) pl.push('Date : '+fdateLong(d.eventDate)); if(d.eventType) pl.push(d.eventType); if(d.eventLocation) pl.push('Lieu : '+d.eventLocation);
     pdf.setFillColor(...soft); pdf.roundedRect(M, y, W-2*M, 9, 1.5, 1.5, 'F');
     pdf.setFont(FN,'bold'); pdf.setFontSize(8.5); pdf.setTextColor(...grey); pdf.text('PRESTATION', M+4, y+5.8);
     pdf.setFont(FN,'normal'); pdf.setFontSize(9.5); pdf.setTextColor(...ink); pdf.text(pdf.splitTextToSize(pl.join('   ·   '), W-2*M-34)[0], M+28, y+5.8);
@@ -552,7 +662,8 @@ function pdfFor(d, opts){
   const tl=[];
   if(t.pct){ tl.push([t.tva?'Total HT avant remise':'Total', eur(t.gross)]); tl.push([`Remise générale (${String(t.pct).replace('.',',')} %)`, '- '+eur(t.remise)]); }
   if(t.tva){ tl.push(['Total HT', eur(t.ht)]); Object.keys(t.vats).sort().forEach(k=>tl.push([`TVA ${k.replace('.',',')} %`, eur(t.vats[k])])); tl.push(['Total TTC', eur(t.ttc), true]); }
-  else tl.push([t.pct?'Total final':'Total', eur(t.ttc), true]);
+  else tl.push([isAv?'Total de l’avoir':(t.pct?'Total final':'Total'), eur(t.ttc), true]);
+  if(isAv && t.tva) tl[tl.length-1][0]='Total de l’avoir TTC';
   if(isInv && t.deposit>0){ tl.push(['Acompte déjà versé', '- '+eur(t.deposit)]); tl.push(['Reste à payer', eur(t.due), true]); }
   if(y + tl.length*6.5 + 12 > H-22){ pdf.addPage(); y=M; }
   const yTot=y;
@@ -561,10 +672,14 @@ function pdfFor(d, opts){
   if(!t.tva){ pdf.text('TVA non applicable, art. 293 B du CGI', W-M, y, {align:'right'}); y+=5; }
   if(p.saleType){ pdf.setTextColor(...ink); pdf.setFontSize(9); pdf.text('Type de vente : '+p.saleType, M, yTot); }
   y+=3;
-  if(d.notes){ pdf.setTextColor(...ink); pdf.setFontSize(9); const nl=pdf.splitTextToSize(d.notes, W-2*M); pdf.text(nl, M, y); y+=nl.length*4+4; }
+  const noteTxt=[isAv && d.reason ? 'Motif : '+d.reason : '', d.notes].filter(Boolean).join('\n');
+  if(noteTxt){ pdf.setTextColor(...ink); pdf.setFontSize(9); const nl=pdf.splitTextToSize(noteTxt, W-2*M); pdf.text(nl, M, y); y+=nl.length*4+4; }
   // conditions + RIB
   const cond=[];
-  if(isInv){
+  if(isAv){
+    cond.push(`Cet avoir vient en déduction de la facture n° ${d.creditOfNumber||'—'}${d.creditOfDate?' du '+fdate(d.creditOfDate):''}.`);
+    cond.push('Le montant sera remboursé ou déduit de votre prochain règlement.');
+  } else if(isInv){
     cond.push('Conditions de règlement : '+termsLabel(p)+(!draft && d.dueDate ? ` (échéance le ${fdate(d.dueDate)})` : ''));
     if(p.paymentMode) cond.push('Mode de règlement : '+p.paymentMode);
     cond.push('Pas d’escompte pour paiement anticipé.');
@@ -583,7 +698,7 @@ function pdfFor(d, opts){
   y+=5; pdf.setFont(FN,'normal'); pdf.setFontSize(8.6); pdf.setTextColor(...ink);
   pdf.text(condLines, M, y); if(rib.length) pdf.text(rib, M+cw+8, y);
   y += Math.max(condLines.length, rib.length)*3.9 + 6;
-  if(!isInv){ if(y+30>H-22){ pdf.addPage(); y=M; } pdf.setDrawColor(200,203,214); pdf.setLineWidth(.3); pdf.roundedRect(W-M-80, y, 80, 28, 2, 2); pdf.setFontSize(8); pdf.setTextColor(...grey); pdf.text('Date, signature et « Bon pour accord »', W-M-77, y+5); }
+  if(!isInv && !isAv){ if(y+30>H-22){ pdf.addPage(); y=M; } pdf.setDrawColor(200,203,214); pdf.setLineWidth(.3); pdf.roundedRect(W-M-80, y, 80, 28, 2, 2); pdf.setFontSize(8); pdf.setTextColor(...grey); pdf.text('Date, signature et « Bon pour accord »', W-M-77, y+5); }
   // pied de page
   const n = pdf.getNumberOfPages();
   for(let i=1;i<=n;i++){ pdf.setPage(i); pdf.setFont(FN,'normal'); pdf.setFontSize(8); pdf.setTextColor(...grey);
@@ -592,7 +707,7 @@ function pdfFor(d, opts){
   return pdf;
 }
 function hexToRgb(h){ const m=(h||'').replace('#','').match(/.{2}/g)||['30','46','c9']; return m.map(x=>parseInt(x,16)); }
-function pdfName(d){ const c=docClient(d); const base = d.number || ((d.type==='facture'?'Facture':'Devis')+'-brouillon'); return `${base} ${clientName(c)}`.replace(/[\\/:*?"<>|]/g,'-')+'.pdf'; }
+function pdfName(d){ const c=docClient(d); const base = d.number || ((DOC_LABEL[d.type]||'Facture')+'-brouillon'); return `${base} ${clientName(c)}`.replace(/[\\/:*?"<>|]/g,'-')+'.pdf'; }
 async function downloadPdf(d){
   let blob;
   try{ const f=await documentFile(d); blob=new Blob([f.bytes],{type:'application/pdf'}); }catch(e){ toast('Le PDF n’a pas pu être créé : '+e.message); return; }
@@ -631,12 +746,13 @@ const UNIT_CODES = {h:'HUR', heure:'HUR', heures:'HUR', jour:'DAY', jours:'DAY',
 function unitCode(q){ return UNIT_CODES[(q||'').trim().toLowerCase()] || 'C62'; }
 const sirenOf = x => { const v=String(x?.siren || x?.siret || '').replace(/\D/g,''); return v.length>=9 ? v.slice(0,9) : ''; };
 /* Une facture électronique ne concerne que les clients professionnels (les particuliers relèvent de l'e-reporting). */
-const facturxApplies = d => d.type==='facture' && (docClient(d)||{}).kind==='entreprise';
+const facturxApplies = d => (d.type==='facture' || d.type==='avoir') && (docClient(d)||{}).kind==='entreprise';
 /* Vérifie qu'une facture peut partir en facture électronique ; renvoie la liste des problèmes. */
 function facturxIssues(d){
   const p=docProfile(d)||{}, c=docClient(d)||{}, out=[];
   if(c.kind!=='entreprise') out.push('Client particulier : pas de facture électronique, le PDF classique suffit.');
-  if(d.type!=='facture' || !d.number) out.push('La facture doit être finalisée (numérotée).');
+  if(!['facture','avoir'].includes(d.type) || !d.number) out.push('Le document doit être finalisé (numéroté).');
+  if(d.type==='avoir' && !d.creditOfNumber) out.push('L’avoir doit indiquer la facture qu’il corrige.');
   if(!sirenOf(p)) out.push('Votre SIREN ou SIRET manque dans le profil.');
   if(!(p.address && p.cp && p.city)) out.push('Votre adresse complète manque dans le profil.');
   if(!vatOn(p) && !p.tvaNumber && !sirenOf(p)) out.push('Votre n° de TVA ou SIREN manque.');
@@ -696,7 +812,7 @@ ${disc>0?`<ram:SpecifiedTradeAllowanceCharge><ram:ChargeIndicator><udt:Indicator
 </rsm:ExchangedDocumentContext>
 <rsm:ExchangedDocument>
 <ram:ID>${xe(d.number)}</ram:ID>
-<ram:TypeCode>380</ram:TypeCode>
+<ram:TypeCode>${d.type==='avoir'?'381':'380'}</ram:TypeCode>
 <ram:IssueDateTime><udt:DateTimeString format="102">${d102(d.issueDate)}</udt:DateTimeString></ram:IssueDateTime>
 ${notes.map(([k,v])=>`<ram:IncludedNote><ram:Content>${xe(v)}</ram:Content>${k?`<ram:SubjectCode>${k}</ram:SubjectCode>`:''}</ram:IncludedNote>`).join('\n')}
 </rsm:ExchangedDocument>
@@ -728,7 +844,7 @@ ${(d.eventDate||d.issueDate)?`<ram:ActualDeliverySupplyChainEvent><ram:Occurrenc
 ${iban?`<ram:SpecifiedTradeSettlementPaymentMeans><ram:TypeCode>58</ram:TypeCode><ram:Information>${xe(p.paymentMode||'Virement bancaire')}</ram:Information><ram:PayeePartyCreditorFinancialAccount><ram:IBANID>${xe(iban)}</ram:IBANID>${holder?`<ram:AccountName>${xe(holder)}</ram:AccountName>`:''}</ram:PayeePartyCreditorFinancialAccount>${bic?`<ram:PayeeSpecifiedCreditorFinancialInstitution><ram:BICID>${xe(bic)}</ram:BICID></ram:PayeeSpecifiedCreditorFinancialInstitution>`:''}</ram:SpecifiedTradeSettlementPaymentMeans>`:''}
 ${taxes}
 ${allowXml}
-<ram:SpecifiedTradePaymentTerms><ram:Description>${xe(termsLabel(p))}</ram:Description>${d.dueDate?`<ram:DueDateDateTime><udt:DateTimeString format="102">${d102(d.dueDate)}</udt:DateTimeString></ram:DueDateDateTime>`:''}</ram:SpecifiedTradePaymentTerms>
+<ram:SpecifiedTradePaymentTerms><ram:Description>${xe(d.type==='avoir' ? 'Avoir sur la facture '+(d.creditOfNumber||'') : termsLabel(p))}</ram:Description>${d.dueDate?`<ram:DueDateDateTime><udt:DateTimeString format="102">${d102(d.dueDate)}</udt:DateTimeString></ram:DueDateDateTime>`:''}</ram:SpecifiedTradePaymentTerms>
 <ram:SpecifiedTradeSettlementHeaderMonetarySummation>
 <ram:LineTotalAmount>${amt(lineSum)}</ram:LineTotalAmount>
 ${allowSum?`<ram:AllowanceTotalAmount>${amt(allowSum)}</ram:AllowanceTotalAmount>`:''}
@@ -738,6 +854,7 @@ ${allowSum?`<ram:AllowanceTotalAmount>${amt(allowSum)}</ram:AllowanceTotalAmount
 ${prepaid?`<ram:TotalPrepaidAmount>${amt(prepaid)}</ram:TotalPrepaidAmount>`:''}
 <ram:DuePayableAmount>${amt(due)}</ram:DuePayableAmount>
 </ram:SpecifiedTradeSettlementHeaderMonetarySummation>
+${d.type==='avoir' && d.creditOfNumber ? `<ram:InvoiceReferencedDocument><ram:IssuerAssignedID>${xe(d.creditOfNumber)}</ram:IssuerAssignedID>${d.creditOfDate?`<ram:FormattedIssueDateTime><qdt:DateTimeString format="102">${d102(d.creditOfDate)}</qdt:DateTimeString></ram:FormattedIssueDateTime>`:''}</ram:InvoiceReferencedDocument>`:''}
 </ram:ApplicableHeaderTradeSettlement>
 </rsm:SupplyChainTradeTransaction>
 </rsm:CrossIndustryInvoice>`.replace(/\n\s*\n/g,'\n');
@@ -774,7 +891,7 @@ async function facturxBytes(d, opts={}){
   const base = pdfFor(d, {pdfa:true}).output('arraybuffer');
   const doc = await PDFDocument.load(base, {updateMetadata:false});
   const p=docProfile(d)||{}; const now=new Date(); now.setMilliseconds(0); const iso=now.toISOString().replace('.000','');
-  const title=`Facture ${d.number}`, author=p.tradeName||p.ownerName||'';
+  const title=`${DOC_LABEL[d.type]||'Facture'} ${d.number}`, author=p.tradeName||p.ownerName||'';
   doc.setTitle(title,{showInWindowTitleBar:true}); doc.setAuthor(author); doc.setProducer('Cabine'); doc.setCreator('Cabine');
   doc.setCreationDate(now); doc.setModificationDate(now); doc.setSubject(''); doc.setKeywords([]);
   const ctx=doc.context;
@@ -896,8 +1013,10 @@ const I = {
 
 /* ---------------- composants de base ---------------- */
 function Sheet({title, onClose, actions, children, wide}){
-  useEffect(()=>{ const k=e=>{ if(e.key==='Escape') onClose(); }; addEventListener('keydown',k); return ()=>removeEventListener('keydown',k); },[]);
-  return html`<div class="overlay" onClick=${e=>{ if(e.target===e.currentTarget) onClose(); }}>
+  // toujours la version actuelle de onClose (sinon Échap réenregistrerait un état périmé)
+  const closeRef=useRef(onClose); closeRef.current=onClose; const box=useRef(null);
+  useEffect(()=>{ const k=e=>{ if(e.key!=='Escape') return; const all=[...document.querySelectorAll('.overlay')]; if(all[all.length-1]===box.current){ e.preventDefault(); closeRef.current(); } }; addEventListener('keydown',k); return ()=>removeEventListener('keydown',k); },[]);
+  return html`<div class="overlay" ref=${box} onClick=${e=>{ if(e.target===e.currentTarget) onClose(); }}>
     <div class=${'sheet'+(wide?' wide':'')} role="dialog" aria-label=${title}>
       <div class="sheet-h"><button class="btn ghost sm" onClick=${onClose}>Fermer</button><h2 style="flex:1;text-align:center;font-size:1.05rem">${title}</h2><div class="row">${actions}</div></div>
       <div class="sheet-b">${children}</div>
@@ -927,7 +1046,7 @@ function Sheets(){
   const [stack,setStack]=useState([]);
   useEffect(()=>{ pushSheet = s => setStack(x=>[...x,s]); },[]);
   const close = key => setStack(x=>x.filter(s=>s.key!==key));
-  const C = {importOv:ImportOverlaySheet, colorOne:ColorOne, dups:DuplicatesSheet, colors:ColorsSheet, yearDetail:YearDetail, send:SendSheet, booking:BookingView, bookingSettings:BookingSettings, client:ClientForm, product:ProductForm, profile:ProfileForm, doc:DocEditor, event:EventForm, confirm:Confirm, clientView:ClientView, picker:ProductPicker};
+  const C = {monthBill:MonthBillSheet, importOv:ImportOverlaySheet, colorOne:ColorOne, dups:DuplicatesSheet, colors:ColorsSheet, yearDetail:YearDetail, send:SendSheet, booking:BookingView, bookingSettings:BookingSettings, client:ClientForm, product:ProductForm, profile:ProfileForm, doc:DocEditor, event:EventForm, confirm:Confirm, clientView:ClientView, picker:ProductPicker};
   return stack.map(s=>{ const Comp=C[s.kind]; return html`<${Comp} key=${s.key} ...${s.props} onClose=${()=>close(s.key)} />`; });
 }
 
@@ -1043,6 +1162,7 @@ function ClientForm({client, onClose, onSaved, defaultKind}){
       <${TA} label="Notes (préférences musicales, infos utiles…)" ...${b('notes')}/>
       <${F} label="Mots-clés pour l’agenda (séparés par des virgules)" full ...${b('keywords')} placeholder=${ent?'ex. delicate, deli, le deli':'ex. mariage camille, camille'}/>
       <div class="full tiny">Quand un de ces mots (ou le début du nom du client) apparaît dans le titre d’un événement Google Agenda, Cabine le rattache à ce client et prépare la facture provisoire à partir de sa dernière facture.</div>
+      <label class="check full"><input type="checkbox" checked=${!!f.monthlyBilling} onChange=${e=>setF(x=>({...x,monthlyBilling:e.target.checked}))}/><span>Facturation mensuelle<br/><span class="tiny">Toutes les dates du mois de ce client sont regroupées sur une seule facture provisoire.</span></span></label>
       <div class="full sect"><div class="lab">Couleur dans le calendrier (facultatif)</div><${ColorPick} allowNone value=${f.color||''} onChange=${v=>setF(x=>({...x,color:v}))}/></div>
     </div>
     ${client && html`<button class="btn danger" onClick=${()=>{ if(S.docs.some(d=>d.clientId===client.id && d.number)){ toast('Ce client a des documents numérotés : il doit être conservé.'); return; } open('confirm',{title:'Supprimer ce client ?', text:'Cette action est définitive.', yes:'Supprimer', danger:true, onYes:()=>{ del('clients',client.id); onClose(); }}); }}>Supprimer ce client</button>`}
@@ -1061,7 +1181,8 @@ function ClientView({clientId, onClose}){
       ${c.notes && html`<div class="small muted" style="white-space:pre-wrap">${c.notes}</div>`}
       <div class="small">Total encaissé : <b>${eur(paid)}</b></div>
     </div>
-    <div class="row"><button class="btn pri" onClick=${()=>open('event',{preset:{clientId:c.id}})}>Ajouter une date</button><button class="btn" onClick=${()=>{ const prev=lastInvoiceForClient(c.id); const d=newDoc('facture',{clientId:c.id, lines: prev?refreshLines(prev.lines, todayISO(), ''):[], eventType:prev?.eventType||'', eventDate:prev?todayISO():'', copiedFrom:prev?.number||''}); open('doc',{doc:d, isNew:true}); }}>Nouvelle facture</button><button class="btn" onClick=${()=>open('doc',{doc:newDoc('devis',{clientId:c.id}), isNew:true})}>Nouveau devis</button></div>
+    <div class="row"><button class="btn pri" onClick=${()=>open('event',{preset:{clientId:c.id}})}>Ajouter une date</button><button class="btn" onClick=${()=>{ const prev=lastInvoiceForClient(c.id); const d=newDoc('facture',{clientId:c.id, lines: prev?refreshLines(prev.lines, todayISO(), ''):[], eventType:prev?.eventType||'', eventDate:prev?todayISO():'', copiedFrom:prev?.number||''}); open('doc',{doc:d, isNew:true}); }}>Nouvelle facture</button><button class="btn" onClick=${()=>open('doc',{doc:newDoc('devis',{clientId:c.id}), isNew:true})}>Nouveau devis</button><button class="btn" onClick=${()=>open('monthBill',{clientId:c.id})}>Facturer le mois</button></div>
+    ${c.monthlyBilling && html`<div class="tiny">Facturation mensuelle activée : chaque nouvelle date s’ajoute à la facture provisoire de son mois.</div>`}
     <div class="sect"><div class="lab">Documents</div>${docs.length? html`<${DocList} docs=${docs}/>` : html`<div class="muted small">Aucun document pour ce client.</div>`}</div>
     <div class="sect"><div class="lab">Dates</div>${evs.length? html`<${EventList} events=${evs}/>` : html`<div class="muted small">Aucune date.</div>`}</div>
   <//>`;
@@ -1123,8 +1244,8 @@ function ProductPicker({onPick, onClose}){
 /* ---------------- documents ---------------- */
 function DocList({docs}){
   return html`<div class="list">${docs.map(d=>{ const st=docState(d); const t=computeTotals(d,docProfile(d)); return html`<button class="item" onClick=${()=>open('doc',{doc:d})}>
-    <div class="grow"><div class="t">${clientName(docClient(d))}</div><div class="tiny">${d.number || (d.type==='facture'?'Facture':'Devis')+' brouillon'}${d.eventDate?' · prestation le '+fdate(d.eventDate):''}${d.eventType?' · '+d.eventType:''}</div></div>
-    <div style="text-align:right;display:flex;flex-direction:column;gap:3px;align-items:flex-end"><span class="amt">${eur(t.ttc)}</span><span class=${'pill '+st.k}>${st.l}</span>${d.pa?.id ? html`<span class=${'pill '+paTone(d.pa.status)}>⇄ ${paLabel(d.pa.status)}${d.pa.sandbox?' (test)':''}</span>`:''}</div></button>`; })}</div>`;
+    <div class="grow"><div class="t">${clientName(docClient(d))}</div><div class="tiny">${d.number || (d.monthly ? 'Facture de '+monthLabel(d.billingMonth)+' · '+(d.monthCount||0)+' date'+((d.monthCount||0)>1?'s':'') : (DOC_LABEL[d.type]||'Facture')+' brouillon')}${d.type==='avoir'&&d.creditOfNumber?' · sur '+d.creditOfNumber:''}${d.eventDate?' · prestation le '+fdate(d.eventDate):''}${d.eventType?' · '+d.eventType:''}</div></div>
+    <div style="text-align:right;display:flex;flex-direction:column;gap:3px;align-items:flex-end"><span class="amt">${d.type==='avoir'?'− ':''}${eur(t.ttc)}</span><span class=${'pill '+st.k}>${st.l}</span>${d.pa?.id ? html`<span class=${'pill '+paTone(d.pa.status)}>⇄ ${paLabel(d.pa.status)}${d.pa.sandbox?' (test)':''}</span>`:''}</div></button>`; })}</div>`;
 }
 function docDate(d, basis){ return basis==='event' ? (d.eventDate||d.issueDate||(d.createdAt||'').slice(0,10)) : (d.issueDate||d.eventDate||(d.createdAt||'').slice(0,10)); }
 function docHaystack(d){
@@ -1161,15 +1282,15 @@ function DocsView(){
   }).sort((a,b)=>(docDate(b,basis)||'').localeCompare(docDate(a,basis)||'') || (b.number||'').localeCompare(a.number||''));
   const counted = list.filter(d=>d.status!=='annulee');
   const sum = counted.reduce((a,d)=>{ const t=computeTotals(d,docProfile(d)); return {ht:a.ht+t.ht, ttc:a.ttc+t.ttc}; },{ht:0,ttc:0});
-  const filters = type==='facture' ? [['all','Toutes'],['draft','Brouillons'],['due','À encaisser'],['paid','Payées']] : [['all','Tous'],['draft','Brouillons'],['due','Envoyés'],['accepted','Acceptés']];
+  const filters = type==='facture' ? [['all','Toutes'],['draft','Brouillons'],['due','À encaisser'],['paid','Payées']] : type==='avoir' ? [['all','Tous'],['draft','Brouillons'],['paid','Émis']] : [['all','Tous'],['draft','Brouillons'],['due','Envoyés'],['accepted','Acceptés']];
   const presets=[['month','Ce mois'],['prev','Mois dernier'],['quarter','Ce trimestre'],['year','Cette année'],['lastyear','Année dernière']];
   const active = presets.find(([k])=>{ const [a,b]=periodPreset(k); return a===from && b===to; })?.[0] || (from||to?'custom':'all');
   const filtered = !!(q || from || to || filter!=='all');
   const anyVat = counted.some(d=>computeTotals(d,docProfile(d)).tva);
   return html`<div class="wrap">
-    <div class="row sb"><h1>${type==='facture'?'Factures':'Devis'}</h1><button class="btn pri" onClick=${()=>open('doc',{doc:newDoc(type), isNew:true})}>${type==='facture'?'Nouvelle facture':'Nouveau devis'}</button></div>
+    <div class="row sb"><h1>${type==='facture'?'Factures':type==='avoir'?'Avoirs':'Devis'}</h1>${type==='avoir' ? html`<span class="tiny" style="max-width:260px">Un avoir se crée depuis la facture à corriger : ouvrez-la puis « Créer un avoir ».</span>` : html`<button class="btn pri" onClick=${()=>open('doc',{doc:newDoc(type), isNew:true})}>${type==='facture'?'Nouvelle facture':'Nouveau devis'}</button>`}</div>
     <div class="row sb">
-      <div class="seg">${[['facture','Factures'],['devis','Devis']].map(([k,l])=>html`<button class=${type===k?'on':''} onClick=${()=>{ setType(k); setFilter('all'); lsSet('cabine-doctype',k); }}>${l}</button>`)}</div>
+      <div class="seg">${[['facture','Factures'],['devis','Devis'],['avoir','Avoirs']].map(([k,l])=>html`<button class=${type===k?'on':''} onClick=${()=>{ setType(k); setFilter('all'); lsSet('cabine-doctype',k); }}>${l}</button>`)}</div>
       <div class="seg">${filters.map(([k,l])=>html`<button class=${filter===k?'on':''} onClick=${()=>setFilter(k)}>${l}</button>`)}</div>
     </div>
     <div class="card stack" style="padding:12px">
@@ -1182,10 +1303,10 @@ function DocsView(){
       </div>
       ${from && to && from>to && html`<div class="small" style="color:var(--bad)">La date de début est après la date de fin.</div>`}
     </div>
-    ${filtered && html`<div class="row sb small"><span><b>${list.length}</b> ${type==='facture'?(list.length>1?'factures trouvées':'facture trouvée'):(list.length>1?'devis trouvés':'devis trouvé')}${list.length!==counted.length?` (dont ${list.length-counted.length} ${list.length-counted.length>1?'annulés, non comptés':'annulé, non compté'})`.replace(/annulé/g, type==='facture'?'annulée':'annulé').replace(/compté/g, type==='facture'?'comptée':'compté'):''}</span><span>Total : <b>${eur(anyVat?sum.ht:sum.ttc)}</b>${anyVat?html` HT · ${eur(sum.ttc)} TTC`:''}</span></div>`}
+    ${filtered && html`<div class="row sb small"><span><b>${list.length}</b> ${type==='facture'?(list.length>1?'factures trouvées':'facture trouvée'):type==='avoir'?(list.length>1?'avoirs trouvés':'avoir trouvé'):(list.length>1?'devis trouvés':'devis trouvé')}${list.length!==counted.length?` (dont ${list.length-counted.length} ${list.length-counted.length>1?'annulés, non comptés':'annulé, non compté'})`.replace(/annulé/g, type==='facture'?'annulée':'annulé').replace(/compté/g, type==='facture'?'comptée':'compté'):''}</span><span>Total : <b>${eur(anyVat?sum.ht:sum.ttc)}</b>${anyVat?html` HT · ${eur(sum.ttc)} TTC`:''}</span></div>`}
     ${list.length ? html`<${DocList} docs=${list.slice(0,limit)}/>${list.length>limit && html`<button class="btn" style="align-self:center" onClick=${()=>setLimit(l=>l+100)}>Afficher plus (${list.length-limit} restant${list.length-limit>1?'s':''})</button>`}`
       : filtered ? html`<div class="card empty"><h3>Aucun résultat</h3><p>Essayez un autre mot ou une autre période.</p><button class="btn" onClick=${()=>{ setQ(''); setFrom(''); setTo(''); setFilter('all'); }}>Tout afficher</button></div>`
-      : html`<div class="card empty"><h3>Rien ici pour l’instant</h3><p>${type==='facture'?'Les dates ajoutées dans l’agenda créent automatiquement une facture brouillon.':'Créez un devis, puis transformez-le en facture quand il est accepté.'}</p></div>`}
+      : html`<div class="card empty"><h3>Rien ici pour l’instant</h3><p>${type==='facture'?'Les dates ajoutées dans l’agenda créent automatiquement une facture brouillon.':type==='avoir'?'Aucun avoir pour l’instant. Pour annuler ou corriger une facture déjà envoyée, ouvrez-la puis touchez « Créer un avoir ».':'Créez un devis, puis transformez-le en facture quand il est accepté.'}</p></div>`}
   </div>`;
 }
 function ClientPicker({value, onChange}){
@@ -1199,19 +1320,20 @@ function DocEditor({doc, isNew, onClose}){
   useStore();
   const live = S.docs.find(x=>x.id===doc.id);
   const [d,setD] = useState(()=>clone(live||doc));
-  const locked = !!d.number && d.type==='facture';
+  const locked = !!d.number && (d.type==='facture' || d.type==='avoir');
   // une facture numérotée n'est plus modifiable : elle suit les mises à jour (paiement, plateforme…)
   const liveKey = live ? JSON.stringify(live) : '';
   useEffect(()=>{ if(locked && live) setD(clone(live)); }, [liveKey]);
   const p = S.profiles.find(x=>x.id===d.profileId) || activeProfile();
   const t = computeTotals(d, d.sellerSnapshot||p);
-  const isInv = d.type==='facture';
+  const isInv = d.type==='facture', isAv = d.type==='avoir';
+  const avoirs = isInv && d.number ? S.docs.filter(a=>a.type==='avoir' && a.creditOf===d.id) : [];
   const set = (k,v)=>setD(x=>({...x,[k]:v}));
   const setLine = (i,k,v)=>setD(x=>({...x, lines:x.lines.map((l,j)=>j===i?{...l,[k]:v}:l)}));
   const addLine = (l)=>setD(x=>({...x, lines:[...(x.lines||[]), {id:uid(), title:l?.title||'', description:l?.description||'', qty:1, unit:l?.unit||0, qunit:l?.qunit||'', disc:0, discKind:'%', vat: vatOn(p)?(l?.vat??20):0}]}));
   const [tab,setTab] = useState('edit');
   const dirty = JSON.stringify(d)!==JSON.stringify(live||{});
-  async function save(silent){ const o=clone(d); o.lines=(o.lines||[]).map(l=>({...l, qty:Number(l.qty)||0, unit:Math.round((Number(l.unit)||0)*10000)/10000, vat:Number(l.vat)||0, disc:Number(l.disc)||0})); o.deposit=r2(o.deposit); o.remisePct=Number(o.remisePct)||0; o.updatedAt=new Date().toISOString(); await put('docs',o); setD(o); if(!silent) toast('Enregistré'); return o; }
+  async function save(silent){ const cur=S.docs.find(x=>x.id===d.id); if(cur?.number && !d.number){ setD(clone(cur)); return cur; } const o=clone(d); o.lines=(o.lines||[]).map(l=>({...l, qty:Number(l.qty)||0, unit:Math.round((Number(l.unit)||0)*10000)/10000, vat:Number(l.vat)||0, disc:Number(l.disc)||0})); o.deposit=r2(o.deposit); o.remisePct=Number(o.remisePct)||0; o.updatedAt=new Date().toISOString(); await put('docs',o); setD(o); if(!silent) toast('Enregistré'); return o; }
   function finalize(){
     if(!d.clientId){ toast('Choisissez un client avant de finaliser.'); return; }
     if(!(d.lines||[]).length){ toast('Ajoutez au moins une ligne.'); return; }
@@ -1219,19 +1341,24 @@ function DocEditor({doc, isNew, onClose}){
     const today=todayISO(); const last=lastFinalDate({...d});
     const issue = last>today ? last : today;
     const n = nextNumber({...d, issueDate:issue});
-    open('confirm',{title: isInv?'Finaliser la facture ?':'Finaliser le devis ?', yes:`Attribuer le n° ${n.number}`,
-      text: isInv ? `La facture recevra le numéro ${n.number}, datée du ${fdate(issue)}. Ensuite elle ne pourra plus être modifiée ni supprimée (c’est la loi). Pour la corriger, il faudra l’annuler.` : `Le devis recevra le numéro ${n.number}. Vous pourrez encore changer son statut ensuite.`,
-      onYes: async()=>{ const o={...clone(d), ...n, issueDate:issue, status: isInv?'finalisee':'envoye', clientSnapshot:clone(clientById(d.clientId)), sellerSnapshot:clone(p),
+    if(isAv){
+      const inv=S.docs.find(x=>x.id===d.creditOf); const max=inv ? r2(computeTotals(inv,docProfile(inv)).ttc - creditedAmount(inv)) : Infinity;
+      if(computeTotals(d,p).ttc > max + 0.005){ toast(`L’avoir dépasse le montant restant de la facture (${eur(max)}).`); return; }
+    }
+    open('confirm',{title: isAv?'Finaliser l’avoir ?':isInv?'Finaliser la facture ?':'Finaliser le devis ?', yes:`Attribuer le n° ${n.number}`,
+      text: isAv ? `L’avoir recevra le numéro ${n.number}, daté du ${fdate(issue)}, et viendra en déduction de la facture ${d.creditOfNumber}. Il ne pourra plus être modifié ensuite.` : isInv ? `La facture recevra le numéro ${n.number}, datée du ${fdate(issue)}. Ensuite elle ne pourra plus être modifiée ni supprimée (c’est la loi). Pour la corriger, il faudra l’annuler.` : `Le devis recevra le numéro ${n.number}. Vous pourrez encore changer son statut ensuite.`,
+      onYes: async()=>{ const o={...clone(d), ...n, issueDate:issue, status: isAv?'emis':isInv?'finalisee':'envoye', clientSnapshot:clone(clientById(d.clientId)), sellerSnapshot:clone(p),
         dueDate: isInv ? dueFrom(issue, p) : '', validUntil: !isInv ? addDays(issue, p.quoteDays||30) : ''};
-        await put('docs',o); setD(o); toast(`${isInv?'Facture':'Devis'} ${n.number} créé`);
-        if(isInv && backend.mode==='supabase' && settings().paEnabled && settings().paAuto && facturxApplies(o)) sendToPA(o); }});
+        await put('docs',o); setD(o); toast(`${DOC_LABEL[d.type]} ${n.number} créé`);
+        if(isAv){ const inv=S.docs.find(x=>x.id===d.creditOf); if(inv && fullyCredited(inv)) toast(`Avoir ${n.number} créé : la facture ${inv.number} est entièrement annulée`); }
+        if((isInv||isAv) && backend.mode==='supabase' && settings().paEnabled && settings().paAuto && facturxApplies(o)) sendToPA(o); }});
   }
   function toInvoice(){
     const inv = newDoc('facture', {profileId:d.profileId, clientId:d.clientId, lines:clone(d.lines).map(l=>({...l,id:uid()})), eventDate:d.eventDate, eventType:d.eventType, eventLocation:d.eventLocation, notes:d.notes, remisePct:d.remisePct||0, fromQuote:d.number||'', eventId:d.eventId});
     put('docs', inv); put('docs', {...clone(d), status:'facture'}); onClose(); open('doc',{doc:inv}); toast('Facture brouillon créée à partir du devis');
   }
   function duplicate(){ const c=newDoc(d.type,{profileId:d.profileId, clientId:d.clientId, lines:clone(d.lines).map(l=>({...l,id:uid()})), eventType:d.eventType, eventLocation:d.eventLocation, notes:d.notes, remisePct:d.remisePct||0}); onClose(); open('doc',{doc:c, isNew:true}); }
-  const title = d.number ? `${isInv?'Facture':'Devis'} ${d.number}` : (isNew?(isInv?'Nouvelle facture':'Nouveau devis'):(isInv?'Facture brouillon':'Devis brouillon'));
+  const title = d.number ? `${DOC_LABEL[d.type]} ${d.number}` : (isAv ? 'Avoir (brouillon)' : isNew?(isInv?'Nouvelle facture':'Nouveau devis'):(isInv?'Facture brouillon':'Devis brouillon'));
   const st = docState(d);
   return html`<${Sheet} wide title=${title} onClose=${async()=>{ if(!locked && dirty && (d.clientId||d.lines.length)) await save(true); onClose(); }}
       actions=${html`<button class="btn sm" onClick=${async()=>{ if(!locked && dirty) await save(true); downloadPdf(d); }}>PDF</button>`}>
@@ -1239,9 +1366,12 @@ function DocEditor({doc, isNew, onClose}){
     <div class="ed-grid" data-tab=${tab}>
     <div class="ed-form">
     <div class="row sb"><span class=${'pill '+st.k}>${st.l}</span>${d.copiedFrom && !d.number && html`<span class="tiny">Lignes reprises de ${d.copiedFrom}, dates mises à jour</span>`}${d.fromQuote && html`<span class="tiny">Issue du devis ${d.fromQuote}</span>`}</div>
-    ${locked && html`<div class="notice">Cette facture est numérotée : son contenu est figé. Vous pouvez la télécharger, l’envoyer et suivre son paiement.</div>`}
-    ${isInv && d.number && !facturxApplies(d) && html`<div class="tiny">Client particulier : facture PDF classique. Les ventes aux particuliers seront déclarées via la plateforme agréée (e-reporting) à partir de septembre 2027.</div>`}
-    ${isInv && d.number && facturxApplies(d) && (()=>{ const iss=facturxIssues(d); return iss.length ? html`<div class="notice warn small"><b>Facture électronique :</b> ${iss.join(' ')}</div>` : html`<div class="small" style="color:var(--ok)">✓ Facture électronique (Factur-X) prête : le PDF téléchargé ou envoyé contient les données de la facture.</div>`; })()}
+    ${d.monthly && html`<div class="notice small"><b>Facture du mois de ${monthLabel(d.billingMonth)}</b> · ${d.monthCount||0} date${(d.monthCount||0)>1?'s':''}. ${!d.number?'Les dates ajoutées ou retirées dans l’agenda mettent à jour la liste et la quantité automatiquement ; vous pouvez modifier les prix.':''}</div>`}
+    ${isAv && html`<div class="notice small">Avoir sur la facture <b>${d.creditOfNumber}</b>${d.creditOfDate?' du '+fdate(d.creditOfDate):''}. ${!d.number?'Par défaut il reprend toute la facture (annulation complète) ; modifiez les lignes ou les montants pour un avoir partiel.':''}</div>`}
+    ${locked && !isAv && html`<div class="notice">Cette facture est numérotée : son contenu est figé. Vous pouvez la télécharger, l’envoyer et suivre son paiement.${avoirs.length?'':' Pour la corriger ou l’annuler, créez un avoir.'}</div>`}
+    ${avoirs.length>0 && html`<div class="card stack"><div style="font-weight:600">Avoirs sur cette facture</div>${avoirs.map(a=>html`<button class="item" style="padding:6px 0" onClick=${()=>open('doc',{doc:a})}><div class="grow">${a.number||'Avoir brouillon'}${a.reason?' · '+a.reason:''}</div><span class="amt">- ${eur(computeTotals(a,docProfile(a)).ttc)}</span></button>`)}<div class="row sb small"><span>Reste dû</span><b>${eur(dueOf(d))}</b></div></div>`}
+    ${(isInv||isAv) && d.number && !facturxApplies(d) && html`<div class="tiny">Client particulier : facture PDF classique. Les ventes aux particuliers seront déclarées via la plateforme agréée (e-reporting) à partir de septembre 2027.</div>`}
+    ${(isInv||isAv) && d.number && facturxApplies(d) && (()=>{ const iss=facturxIssues(d); return iss.length ? html`<div class="notice warn small"><b>Facture électronique :</b> ${iss.join(' ')}</div>` : html`<div class="small" style="color:var(--ok)">✓ Facture électronique (Factur-X) prête : le PDF téléchargé ou envoyé contient les données de la facture.</div>`; })()}
     ${live?.pa?.id && html`<div class="card row sb"><div><div style="font-weight:600">Plateforme agréée${live.pa.sandbox?' (test)':''}</div><div class="tiny">Transmise le ${new Date(live.pa.sentAt).toLocaleDateString('fr-FR')}${live.pa.format==='cii'?' (format XML CII)':' (Factur-X)'}${live.pa.updatedAt?' · mise à jour le '+new Date(live.pa.updatedAt).toLocaleDateString('fr-FR'):''}</div></div><span class=${'pill '+paTone(live.pa.status)}>${paLabel(live.pa.status)}</span></div>`}
     ${live?.paError && !live?.pa?.id && html`<div class="notice warn small">Dernier essai d’envoi à la plateforme refusé : ${live.paError}</div>`}
     ${d.imported && html`<div class="notice small">Facture importée de votre historique.${d.paidAssumed?' Le statut « payée » a été déduit de la date d’échéance. Corrigez-le si besoin.':''}</div>`}
@@ -1274,7 +1404,7 @@ function DocEditor({doc, isNew, onClose}){
       </div>
       <div class="sect"><div class="lab">Complément</div>
         <div class="fields">
-          ${isInv ? html`<${F} label="Acompte déjà versé (€)" type="number" step="0.01" value=${d.deposit} onInput=${v=>set('deposit',v)}/>` : html`<${F} label="Acompte demandé à la réservation (€)" type="number" step="0.01" value=${d.depositRequested} onInput=${v=>set('depositRequested',v)}/>`}
+          ${isAv ? html`<${F} label="Motif de l’avoir (imprimé sur le document)" value=${d.reason} onInput=${v=>set('reason',v)} placeholder="ex. Prestation annulée, erreur de montant, geste commercial"/>` : isInv ? html`<${F} label="Acompte déjà versé (€)" type="number" step="0.01" value=${d.deposit} onInput=${v=>set('deposit',v)}/>` : html`<${F} label="Acompte demandé à la réservation (€)" type="number" step="0.01" value=${d.depositRequested} onInput=${v=>set('depositRequested',v)}/>`}
           <${F} label="Remise générale (%)" type="number" step="0.5" value=${d.remisePct||''} placeholder="0" onInput=${v=>set('remisePct',v)}/>
           <${TA} label="Note affichée sur le document" value=${d.notes} onInput=${v=>set('notes',v)} placeholder="ex. Merci pour votre confiance !"/>
         </div></div>
@@ -1286,17 +1416,18 @@ function DocEditor({doc, isNew, onClose}){
       ${isInv && t.deposit>0 && html`<div class="muted"><span>Acompte versé</span><span>- ${eur(t.deposit)}</span></div><div class="big"><span>Reste à payer</span><span>${eur(t.due)}</span></div>`}
     </div>
     <div class="row">
-      ${!d.number && html`<button class="btn" onClick=${()=>save()} disabled=${!dirty && !!live}>Enregistrer le brouillon</button><button class="btn pri" onClick=${finalize}>${isInv?'Finaliser et numéroter':'Finaliser le devis'}</button>`}
-      ${isInv && d.number && d.status!=='payee' && d.status!=='annulee' && html`<button class="btn pri" onClick=${async()=>{ const o={...clone(d), status:'payee', paidAt:todayISO()}; await put('docs',o); setD(o); toast('Facture marquée payée'); }}>Marquer payée</button>`}
+      ${!d.number && html`<button class="btn" onClick=${()=>save()} disabled=${!dirty && !!live}>Enregistrer le brouillon</button><button class="btn pri" onClick=${finalize}>${isAv?'Finaliser l’avoir':isInv?'Finaliser et numéroter':'Finaliser le devis'}</button>`}
+      ${isInv && d.number && d.status!=='annulee' && !fullyCredited(d) && html`<button class="btn" onClick=${()=>open('doc',{doc:newAvoir(d), isNew:true})}>Créer un avoir</button>`}
+      ${isInv && d.number && d.status!=='payee' && d.status!=='annulee' && !fullyCredited(d) && html`<button class="btn pri" onClick=${async()=>{ const o={...clone(d), status:'payee', paidAt:todayISO()}; await put('docs',o); setD(o); toast('Facture marquée payée'); }}>Marquer payée</button>`}
       ${isInv && d.status==='payee' && html`<button class="btn" onClick=${async()=>{ const o={...clone(d), status:'finalisee', paidAt:''}; await put('docs',o); setD(o); }}>Annuler le paiement</button>`}
       ${!isInv && d.number && d.status==='envoye' && html`<button class="btn pri" onClick=${async()=>{ const o={...clone(d), status:'accepte'}; await put('docs',o); setD(o); }}>Accepté</button><button class="btn" onClick=${async()=>{ const o={...clone(d), status:'refuse'}; await put('docs',o); setD(o); }}>Refusé</button>`}
       ${!isInv && d.status!=='facture' && d.status!=='refuse' && html`<button class="btn" onClick=${toInvoice}>Transformer en facture</button>`}
-      ${backend.mode==='supabase' && settings().paEnabled && isInv && d.number && facturxApplies(d) && (!d.pa?.id || d.pa?.sandbox) && d.status!=='annulee' && html`<button class="btn pri" onClick=${()=>sendToPA(d)}>Transmettre via la plateforme agréée</button>`}
+      ${backend.mode==='supabase' && settings().paEnabled && (isInv||isAv) && d.number && facturxApplies(d) && (!d.pa?.id || d.pa?.sandbox) && d.status!=='annulee' && html`<button class="btn pri" onClick=${()=>sendToPA(d)}>Transmettre via la plateforme agréée</button>`}
       ${backend.mode==='supabase' && d.number && html`<button class="btn ${settings().paEnabled&&facturxApplies(d)?'':'pri'}" onClick=${()=>open('send',{doc:d})}>${d.sentAt?'Renvoyer par e-mail':'Envoyer par e-mail'}</button>`}
       <button class="btn" onClick=${()=>downloadPdf(d)}>Télécharger le PDF</button>
       <button class="btn ghost" onClick=${duplicate}>Dupliquer</button>
       ${!d.number && live && html`<button class="btn danger" onClick=${()=>open('confirm',{title:'Supprimer ce brouillon ?', text:'Il n’a pas encore de numéro, il peut être supprimé sans problème.', yes:'Supprimer', danger:true, onYes:()=>{ del('docs',d.id); S.events.filter(e=>e.invoiceId===d.id).forEach(e=>put('events',{...e,invoiceId:''})); onClose(); }})}>Supprimer</button>`}
-      ${isInv && d.number && d.status!=='annulee' && html`<button class="btn danger" onClick=${()=>open('confirm',{title:'Annuler cette facture ?', text:'Elle restera dans vos documents avec la mention « Annulée » et son numéro ne sera pas réutilisé. Pensez à établir un avoir si elle a déjà été envoyée.', yes:'Annuler la facture', danger:true, onYes:async()=>{ const o={...clone(d), status:'annulee'}; await put('docs',o); setD(o); }})}>Annuler la facture</button>`}
+      ${isInv && d.number && d.status!=='annulee' && !avoirs.length && html`<button class="btn danger" onClick=${()=>open('confirm',{title:'Annuler cette facture ?', text:'À utiliser seulement si la facture n’a jamais été envoyée au client. Elle restera dans vos documents avec la mention « Annulée » et son numéro ne sera pas réutilisé. Si le client l’a reçue, créez plutôt un avoir.', yes:'Annuler la facture', danger:true, onYes:async()=>{ const o={...clone(d), status:'annulee'}; await put('docs',o); setD(o); }})}>Annuler la facture</button>`}
     </div>
     ${d.sentAt ? html`<div class="tiny">Envoyé le ${new Date(d.sentAt).toLocaleDateString('fr-FR')} à ${d.sentTo}</div>` : backend.mode!=='supabase' ? html`<div class="tiny">L’envoi par e-mail est disponible sur la version installée. Ici, téléchargez le PDF et joignez-le à votre e-mail.</div>` : (!d.number ? html`<div class="tiny">Finalisez le document pour pouvoir l’envoyer par e-mail.</div>` : '')}
     </div>
@@ -1348,7 +1479,11 @@ function EventForm({event, preset, onClose}){
     if(isPresta && mk && !o.invoiceId){ const inv=draftFromEvent(o); o.invoiceId=inv.id; await put('docs',inv); }
     // garder la facture brouillon liée à jour
     const inv = S.docs.find(x=>x.id===o.invoiceId);
-    if(inv && inv.status==='brouillon' && event){ await put('docs',{...inv, eventDate:o.date, eventType:o.eventType, eventLocation:o.location, clientId: inv.clientId||o.clientId}); }
+    const nowMonthly = !!(o.clientId && clientById(o.clientId)?.monthlyBilling && isPresta);
+    if(inv && inv.status==='brouillon' && event && (inv.monthly || nowMonthly)){
+      // facture du mois : la date est retirée puis replacée (autre mois, autre client, autre lieu…)
+      await detachEventInvoice(event); o = await attachEventInvoice({...o, invoiceId:''});
+    } else if(inv && inv.status==='brouillon' && event){ await put('docs',{...inv, eventDate:o.date, eventType:o.eventType, eventLocation:o.location, clientId: inv.clientId||o.clientId}); }
     await put('events', o);
     if(o.fromGoogle) OV.cache={};
     if(canLearn && learn){ const c=clientById(o.clientId); const kw=cleanTitle(o.googleTitle);
@@ -1386,7 +1521,7 @@ function EventForm({event, preset, onClose}){
       <div class="row"><button class="btn sm pri" onClick=${()=>open('doc',{doc:linked})}>${linked.number?'Voir la facture':'Modifier la facture'}</button>${!linked.number && html`<button class="btn sm" onClick=${()=>open('doc',{doc:linked})}>Finaliser…</button>`}</div>
     </div>`; })()}
     ${event && html`<button class="btn danger" onClick=${()=>{ const inv=S.docs.find(x=>x.id===event.invoiceId); const draft=inv&&inv.status==='brouillon';
-      open('confirm',{title:'Supprimer cette date ?', text: draft?'La facture brouillon liée sera supprimée aussi.':'La date sera retirée de l’agenda.', yes:'Supprimer', danger:true, onYes:()=>{ if(draft) del('docs',inv.id); del('events',event.id); onClose(); }}); }}>Supprimer cette date</button>`}
+      open('confirm',{title:'Supprimer cette date ?', text: draft?(inv.monthly?'La date sera retirée de la facture du mois.':'La facture brouillon liée sera supprimée aussi.'):'La date sera retirée de l’agenda.', yes:'Supprimer', danger:true, onYes:async()=>{ if(draft) await detachEventInvoice(event); del('events',event.id); onClose(); }}); }}>Supprimer cette date</button>`}
     <datalist id="evtypes2">${EVENT_TYPES.map(x=>html`<option value=${x}/>`)}</datalist>
   <//>`;
 }
@@ -1440,6 +1575,7 @@ async function rematchGoogleEvents(){
   for(const e of S.events.filter(x=>x.fromGoogle && !x.clientId)){
     const c=matchClient((e.googleTitle||e.location||'')+' '+(e.googleLocation||'')); if(!c) continue;
     const upd={...e, clientId:c.id, location: placeFor(c, e.googleTitle||e.location||'', e.googleLocation) || e.location};
+    if(c.monthlyBilling && e.kind!=='rdv'){ await detachEventInvoice(e); const re=await attachEventInvoice({...upd, invoiceId:''}); await put('events', re, {noSync:true}); n++; continue; }
     await put('events', upd, {noSync:true});
     const inv=S.docs.find(d=>d.id===e.invoiceId);
     if(inv && inv.status==='brouillon'){
@@ -1534,7 +1670,7 @@ function DuplicatesSheet({onClose}){
     const g=chosen.filter(x=>x.type==='google').map(x=>({calendarId:x.g.calendarId, id:x.g.id}));
     let deleted=0;
     if(g.length){ const r=await gcall('delete-many',{items:g}); deleted+=r.deleted||0; }
-    for(const x of chosen.filter(x=>x.type==='cabine')){ const inv=S.docs.find(d=>d.id===x.e.invoiceId); if(inv && !inv.number) await del('docs',inv.id); await del('events',x.e.id); deleted++; }
+    for(const x of chosen.filter(x=>x.type==='cabine')){ const inv=S.docs.find(d=>d.id===x.e.invoiceId); if(inv && !inv.number) await detachEventInvoice(x.e); await del('events',x.e.id); deleted++; }
     OV.cache={}; toast(`${deleted} doublon${deleted>1?'s':''} supprimé${deleted>1?'s':''}`); onClose();
   }
   return html`<${Sheet} title="Doublons d’agenda" onClose=${onClose} actions=${list?.length ? html`<button class="btn danger sm" disabled=${busy||!n} onClick=${go}>${busy?'Suppression…':`Supprimer (${n})`}</button>`:''}>
@@ -1700,20 +1836,23 @@ function AgendaView(){
 
 function YearDetail({year, onClose}){
   useStore(); const p=activeProfile();
-  const all = S.docs.filter(d=>d.type==='facture' && d.number && (!p || d.profileId===p.id) && (d.issueDate||'').startsWith(year)).sort((a,b)=>a.number.localeCompare(b.number));
+  const all = S.docs.filter(d=>(d.type==='facture'||d.type==='avoir') && d.number && (!p || d.profileId===p.id) && (d.issueDate||'').startsWith(year)).sort((a,b)=>a.number.localeCompare(b.number));
   const counted = all.filter(d=>d.status!=='annulee'), cancelled = all.filter(d=>d.status==='annulee');
-  const ht = d=>computeTotals(d,docProfile(d)).ht;
+  const nInv = counted.filter(d=>d.type==='facture').length, nAv = counted.filter(d=>d.type==='avoir').length;
+  const ht = caOf;
   const byMonth = MONTHS.map((m,i)=>{ const k=year+'-'+String(i+1).padStart(2,'0'); const ds=counted.filter(d=>d.issueDate.startsWith(k)); return [m, ds.length, ds.reduce((a,d)=>a+ht(d),0)]; }).filter(x=>x[1]);
   const drafts = S.docs.filter(d=>d.type==='facture' && !d.number && (!p || d.profileId===p.id));
   return html`<${Sheet} title=${'Facturé en '+year} onClose=${onClose}>
-    <div class="card totals" style="align-items:stretch"><div class="big"><span>${counted.length} factures</span><span>${eur(counted.reduce((a,d)=>a+ht(d),0))}</span></div></div>
+    <div class="card totals" style="align-items:stretch"><div class="big"><span>${nInv} factures${nAv?` − ${nAv} avoir${nAv>1?'s':''}`:''}</span><span>${eur(counted.reduce((a,d)=>a+ht(d),0))}</span></div></div>
     <div class="sect"><div class="lab">Par mois (date de la facture)</div>
       <div class="list">${byMonth.map(([m,n,v])=>html`<div class="item"><div class="grow" style="text-transform:capitalize">${m}</div><span class="tiny">${n} fact.</span><span class="amt" style="min-width:96px;text-align:right">${eur(v)}</span></div>`)}</div></div>
-    <div class="sect"><div class="lab">Factures comptées</div><${DocList} docs=${counted}/></div>
+    <div class="sect"><div class="lab">Factures et avoirs comptés</div><${DocList} docs=${counted}/></div>
     <div class="sect"><div class="lab">Annulées, non comptées (${cancelled.length})</div>${cancelled.length? html`<${DocList} docs=${cancelled}/>` : html`<div class="muted small">Aucune.</div>`}</div>
     <div class="tiny">Les ${drafts.length} facture${drafts.length>1?'s':''} provisoire${drafts.length>1?'s':''} (brouillons sans numéro) ne sont jamais comptées.</div>
   <//>`;
 }
+/* Chiffre d'affaires HT d'un document : négatif pour un avoir, nul pour une facture annulée */
+const caOf = d => d.status==='annulee' ? 0 : (d.type==='avoir' ? -1 : 1) * computeTotals(d,docProfile(d)).ht;
 /* ---------------- accueil ---------------- */
 function HomeView(){
   useStore(); const p=activeProfile(); const y=todayISO().slice(0,4);
@@ -1722,8 +1861,9 @@ function HomeView(){
   const tot = d=>computeTotals(d,docProfile(d)).ttc;
   const paidYear = inv.filter(d=>d.status==='payee' && (d.paidAt||d.issueDate||'').startsWith(y)).reduce((a,d)=>a+computeTotals(d,docProfile(d)).ht,0);
   const billedYearDocs = inv.filter(d=>d.number && d.status!=='annulee' && (d.issueDate||'').startsWith(y));
-  const billedYear = billedYearDocs.reduce((a,d)=>a+computeTotals(d,docProfile(d)).ht,0);
-  const toCollect = inv.filter(d=>d.number && d.status==='finalisee').reduce((a,d)=>a+computeTotals(d,docProfile(d)).due,0);
+  const avYear = mine.filter(d=>d.type==='avoir' && d.number && d.status!=='annulee' && (d.issueDate||'').startsWith(y));
+  const billedYear = [...billedYearDocs, ...avYear].reduce((a,d)=>a+caOf(d),0);
+  const toCollect = inv.filter(d=>d.number && d.status==='finalisee').reduce((a,d)=>a+dueOf(d),0);
   const late = inv.filter(d=>docState(d).k==='late');
   const drafts = inv.filter(d=>d.status==='brouillon').sort((a,b)=>(a.eventDate||'').localeCompare(b.eventDate||''));
   const upcoming = S.events.filter(e=>e.date>=todayISO() && (!p || e.profileId===p.id || !e.profileId)).sort((a,b)=>a.date.localeCompare(b.date)).slice(0,5);
@@ -1734,7 +1874,7 @@ function HomeView(){
     <${ImportCard}/>
     ${pastDrafts.length>0 && html`<div class="notice warn">${pastDrafts.length} prestation${pastDrafts.length>1?'s sont passées':' est passée'} sans facture finalisée. <button class="btn ghost sm" onClick=${()=>open('doc',{doc:pastDrafts[0]})}>Voir</button></div>`}
     <div class="stats">
-      <button class="card stat" style="text-align:left;font:inherit;color:inherit;cursor:pointer" onClick=${()=>open('yearDetail',{year:y})}><div class="lab">Facturé en ${y}</div><div class="val">${eur(billedYear)}</div><div class="sub">${billedYearDocs.length} facture${billedYearDocs.length>1?'s':''} numérotée${billedYearDocs.length>1?'s':''}${vatOn(p)?', hors taxes':''} · voir le détail</div></button>
+      <button class="card stat" style="text-align:left;font:inherit;color:inherit;cursor:pointer" onClick=${()=>open('yearDetail',{year:y})}><div class="lab">Facturé en ${y}</div><div class="val">${eur(billedYear)}</div><div class="sub">${billedYearDocs.length} facture${billedYearDocs.length>1?'s':''}${avYear.length?` − ${avYear.length} avoir${avYear.length>1?'s':''}`:''}${vatOn(p)?', hors taxes':''} · voir le détail</div></button>
       <div class="card stat"><div class="lab">Encaissé en ${y}</div><div class="val">${eur(paidYear)}</div>${ceiling? html`<div class="meter"><i style=${`width:${Math.min(100,paidYear/ceiling*100)}%`}></i></div><div class="sub">${Math.round(paidYear/ceiling*100)} % du plafond micro (${eur(ceiling)})</div>`: html`<div class="sub">Montant hors taxes</div>`}</div>
       <div class="card stat"><div class="lab">À encaisser</div><div class="val">${eur(toCollect)}</div><div class="sub">${late.length? late.length+' facture'+(late.length>1?'s':'')+' en retard':'Aucun retard'}</div></div>
       <div class="card stat"><div class="lab">Brouillons</div><div class="val">${drafts.length}</div><div class="sub">${eur(drafts.reduce((a,d)=>a+tot(d),0))} prévus</div></div>
@@ -1874,10 +2014,10 @@ function Login(){
 function mailTemplate(d){
   const c=docClient(d)||{}; const p=docProfile(d)||{}; const t=computeTotals(d,p);
   const hello = c.kind==='entreprise' ? (c.contact ? 'Bonjour '+c.contact.split(' ')[0]+',' : 'Bonjour,') : ('Bonjour'+(c.firstName?' '+c.firstName:'')+',');
-  const what = d.type==='facture' ? `la facture ${d.number} d’un montant de ${eur(t.due)}` : `le devis ${d.number} d’un montant de ${eur(t.ttc)}`;
+  const what = d.type==='avoir' ? `l’avoir ${d.number} d’un montant de ${eur(t.ttc)}, qui vient en déduction de la facture ${d.creditOfNumber}` : d.type==='facture' ? `la facture ${d.number} d’un montant de ${eur(dueOf(d))}` : `le devis ${d.number} d’un montant de ${eur(t.ttc)}`;
   const presta = d.eventDate ? ` pour la prestation du ${fdate(d.eventDate)}${d.eventLocation?' ('+d.eventLocation+')':''}` : '';
   const pay = d.type==='facture' && d.dueDate ? `\n\nÉchéance de paiement : ${fdate(d.dueDate)}.${p.iban?' Règlement par virement (coordonnées bancaires sur la facture).':''}` : (d.type==='devis'?'\n\nN’hésitez pas à me contacter pour toute question. Pour valider, il suffit de me retourner le devis signé.':'');
-  return {subject:`${d.type==='facture'?'Facture':'Devis'} ${d.number} – ${p.tradeName||p.ownerName||''}`.trim(),
+  return {subject:`${DOC_LABEL[d.type]||'Facture'} ${d.number} – ${p.tradeName||p.ownerName||''}`.trim(),
     text:`${hello}\n\nVeuillez trouver ci-joint ${what}${presta}.${pay}\n\nMerci pour votre confiance,\n${p.ownerName||''}${p.tradeName?'\n'+p.tradeName:''}${p.phone?'\n'+p.phone:''}`};
 }
 function SendSheet({doc, onClose}){
