@@ -1883,6 +1883,18 @@ function AgendaView(){
   const [slide,setSlide]=useState('');
   const shift=n=>{ setSlide(n>0?'next':'prev'); setCur(c=>{ const d=new Date(c.y,c.m+n,1); return {y:d.getFullYear(), m:d.getMonth()}; }); };
   const calRef=useSwipe({onLeft:()=>shift(1), onRight:()=>shift(-1)});
+  // ordinateur : flèches ← → du clavier pour changer de mois
+  const shiftRef=useRef(shift); shiftRef.current=shift;
+  useEffect(()=>{
+    const k=e=>{
+      if(e.key!=='ArrowLeft' && e.key!=='ArrowRight') return;
+      if(e.altKey || e.ctrlKey || e.metaKey || e.shiftKey) return;
+      if(document.querySelector('.overlay')) return;
+      const t=e.target; if(t && (t.closest?.('input,textarea,select,[contenteditable="true"]'))) return;
+      e.preventDefault(); shiftRef.current(e.key==='ArrowRight'?1:-1);
+    };
+    addEventListener('keydown',k); return ()=>removeEventListener('keydown',k);
+  },[]);
   const selEvents=(byDate[sel]||[]).sort((a,b)=>(a.start||'').localeCompare(b.start||''));
   const upcoming=S.events.filter(e=>e.date>=todayISO()).sort((a,b)=>a.date.localeCompare(b.date)).slice(0,8);
   const rows = days.slice(35).every(d=>d.getMonth()!==cur.m) ? 35 : 42;
@@ -1897,7 +1909,7 @@ function AgendaView(){
   return html`<div class="wrap">
     <div class="row sb"><div><h1>Agenda</h1>${googleOn() && html`<div class="tiny">${backend.lastSync?'Synchronisé avec Google à '+backend.lastSync.toLocaleTimeString('fr-FR',{hour:'2-digit',minute:'2-digit'}):'Synchronisation avec Google…'} · <button class="btn ghost sm" style="min-height:0;padding:0 4px" onClick=${async()=>{ await syncOnOpen(); toast('Agenda synchronisé'); }}>Actualiser</button></div>`}</div><button class="btn pri" onClick=${()=>open('event',{preset:{date:sel}})}>Ajouter une date</button></div>
     <div class="card stack" ref=${calRef} style="touch-action:pan-y">
-      <div class="row sb"><button class="btn sm" onClick=${()=>shift(-1)} aria-label="Mois précédent">‹</button><h2 style="text-transform:capitalize">${MONTHS[cur.m]} ${cur.y}</h2><button class="btn sm" onClick=${()=>shift(1)} aria-label="Mois suivant">›</button></div>
+      <div class="row sb"><button class="btn sm" onClick=${()=>shift(-1)} aria-label="Mois précédent" title="Mois précédent (flèche ←)">‹</button><h2 style="text-transform:capitalize">${MONTHS[cur.m]} ${cur.y}</h2><button class="btn sm" onClick=${()=>shift(1)} aria-label="Mois suivant" title="Mois suivant (flèche →)">›</button></div>
       <div class=${'cal'+(slide?' slide-'+slide:'')} key=${cur.y+'-'+cur.m}>${['lun','mar','mer','jeu','ven','sam','dim'].map(d=>html`<div class="dow">${d}</div>`)}
         ${days.slice(0,rows).map(d=>{ const k=iso(d); const evs=(byDate[k]||[]).slice().sort((a,b)=>(a.start||'').localeCompare(b.start||'')); const ovs=ovBy[k]||[];
           const max=wide?4:3; const all=[...evs.map(e=>({t:'c',e})), ...ovs.map(e=>({t:'g',e}))]; const shown=all.slice(0, all.length>max?max-1:max);
