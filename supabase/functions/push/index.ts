@@ -1,5 +1,6 @@
 // Fonction privée : clé publique des notifications et notification de test.
 import { admin, cors, json } from "../_shared/google.ts";
+import { isOwner } from "../_shared/google.ts";
 import { pushToUser, vapidPublicKey } from "../_shared/push.ts";
 
 Deno.serve(async (req) => {
@@ -8,6 +9,7 @@ Deno.serve(async (req) => {
     const jwt = (req.headers.get("Authorization") || "").replace("Bearer ", "");
     const { data: { user }, error } = await admin.auth.getUser(jwt);
     if (error || !user) return json({ error: "non_connecte" }, 401);
+    if (!isOwner(user.id)) return json({ error: "non_autorise" }, 403);
     const body = await req.json().catch(() => ({}));
     if (body.action === "key") return json({ publicKey: vapidPublicKey });
     if (body.action === "test") {

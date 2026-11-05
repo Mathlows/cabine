@@ -81,3 +81,9 @@ export function utcToParis(dt: Date): { date: string; time: string } {
   const g = (t: string) => parts.find((p) => p.type === t)!.value;
   return { date: `${g("year")}-${g("month")}-${g("day")}`, time: `${g("hour")}:${g("minute")}` };
 }
+
+/* Seul le propriétaire du compte (premier inscrit) peut utiliser les fonctions sensibles. */
+export function isOwner(userId: string) {
+  const owner = Deno.env.get("OWNER_USER_ID");
+  return !owner || owner === userId;
+}

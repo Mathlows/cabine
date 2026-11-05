@@ -126,6 +126,18 @@ jobs:
           # jeton à usage unique pour la notification de test (renouvelé à chaque mise en ligne)
           TT=$(openssl rand -hex 24); echo "::add-mask::$TT"; echo "TEST_TOKEN=$TT" >> "$GITHUB_ENV"
           supabase secrets set --project-ref "$PROJECT_REF" --yes REMINDERS_TEST_TOKEN="$TT"
+      - name: "Sécurité - propriétaire unique et inscriptions fermées"
+        run: |
+          q(){ curl -sS -m 30 "https://api.supabase.com/v1/projects/$PROJECT_REF/database/query" -H "Authorization: Bearer $SUPABASE_ACCESS_TOKEN" -H "Content-Type: application/json" -d "{\"query\":\"$1\"}"; }
+          N=$(q "select count(*) as n from auth.users" | jq -r '.[0].n')
+          echo "Comptes utilisateurs dans la base : $N"
+          OWNER=$(q "select id from auth.users order by created_at asc limit 1" | jq -r '.[0].id // empty')
+          if [ -n "$OWNER" ]; then echo "::add-mask::$OWNER"; supabase secrets set --project-ref "$PROJECT_REF" --yes OWNER_USER_ID="$OWNER"; echo "Fonctions réservées au propriétaire du compte (le premier inscrit)"; fi
+          BEFORE=$(curl -sS "https://api.supabase.com/v1/projects/$PROJECT_REF/config/auth" -H "Authorization: Bearer $SUPABASE_ACCESS_TOKEN" | jq -r '.disable_signup')
+          echo "Inscriptions fermées avant : $BEFORE"
+          curl -sS --fail-with-body -X PATCH "https://api.supabase.com/v1/projects/$PROJECT_REF/config/auth" -H "Authorization: Bearer $SUPABASE_ACCESS_TOKEN" -H "Content-Type: application/json" -d '{"disable_signup":true}' > /dev/null
+          AFTER=$(curl -sS "https://api.supabase.com/v1/projects/$PROJECT_REF/config/auth" -H "Authorization: Bearer $SUPABASE_ACCESS_TOKEN" | jq -r '.disable_signup')
+          echo "Inscriptions fermées maintenant : $AFTER"
       - name: Déployer les fonctions
         run: |
           supabase functions deploy google --project-ref "$PROJECT_REF" --yes

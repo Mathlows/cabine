@@ -1,6 +1,7 @@
 // Fonction privée : dépôt des factures électroniques sur la plateforme agréée SuperPDP et suivi des statuts.
 // Identifiants : secrets SUPERPDP_CLIENT_ID / SUPERPDP_CLIENT_SECRET (environnement de test ou de production).
 import { admin, cors, json } from "../_shared/google.ts";
+import { isOwner } from "../_shared/google.ts";
 
 const API = Deno.env.get("SUPERPDP_API_URL") || "https://api.superpdp.tech/v1.beta";
 const AUTH = Deno.env.get("SUPERPDP_AUTH_URL") || "https://api.superpdp.tech/oauth2/token";
@@ -36,6 +37,7 @@ Deno.serve(async (req) => {
     const jwt = (req.headers.get("Authorization") || "").replace("Bearer ", "");
     const { data: { user }, error } = await admin.auth.getUser(jwt);
     if (error || !user) return json({ error: "non_connecte" }, 401);
+    if (!isOwner(user.id)) return json({ error: "non_autorise" }, 403);
     const owner = Deno.env.get("OWNER_EMAIL");
     if (owner && user.email?.toLowerCase() !== owner.toLowerCase()) return json({ error: "non_autorise" }, 403);
     const body = await req.json();

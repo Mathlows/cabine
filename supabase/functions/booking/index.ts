@@ -101,6 +101,9 @@ Deno.serve(async (req) => {
       if (!slot) return json({ error: "creneau_indisponible" }, 409);
       const { count } = await admin.from("booking_requests").select("id", { count: "exact", head: true }).eq("user_id", u).eq("status", "pending").filter("form->>email", "eq", form.email);
       if ((count || 0) >= 3) return json({ error: "trop_de_demandes" }, 429);
+      const since = new Date(Date.now() - 24 * 3600 * 1000).toISOString();
+      const { count: day } = await admin.from("booking_requests").select("id", { count: "exact", head: true }).eq("user_id", u).gte("created_at", since);
+      if ((day || 0) >= 20) return json({ error: "trop_de_demandes" }, 429);
       const { error } = await admin.from("booking_requests").insert({ user_id: u, slot_start: slot.start, slot_end: slot.end, form });
       if (error) throw error;
       const who = [form.firstName, form.lastName].filter(Boolean).join(" ") || form.company;

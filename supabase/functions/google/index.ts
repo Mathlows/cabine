@@ -1,5 +1,6 @@
 // Fonction privée (appelée par l'application connectée) : e-mails Gmail et Google Agenda.
 import { accessToken, admin, cors, gfetch, json, sendMail, TZ } from "../_shared/google.ts";
+import { isOwner } from "../_shared/google.ts";
 
 const CAL = "https://www.googleapis.com/calendar/v3";
 
@@ -25,6 +26,7 @@ Deno.serve(async (req) => {
     const jwt = (req.headers.get("Authorization") || "").replace("Bearer ", "");
     const { data: { user }, error } = await admin.auth.getUser(jwt);
     if (error || !user) return json({ error: "non_connecte" }, 401);
+    if (!isOwner(user.id)) return json({ error: "non_autorise" }, 403);
     const body = await req.json();
     const { token, email } = await accessToken(user.id);
     const calId = encodeURIComponent(body.calendarId || "primary");
