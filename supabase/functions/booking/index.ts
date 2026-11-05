@@ -1,5 +1,14 @@
 // Fonction publique : page de réservation (créneaux libres, demande de rendez-vous, choix d'un créneau proposé).
 import { accessToken, admin, cors, gfetch, json, parisToUtc, sendMail, utcToParis } from "../_shared/google.ts";
+import { pushToUser } from "../_shared/push.ts";
+
+const APP_URL = (Deno.env.get("APP_URL") || "https://mathlows.github.io/cabine/").replace(/#.*$/, "");
+const appLink = (id: string) => `${APP_URL}#bk-${id}`;
+
+/* Notification sur le téléphone (si les notifications sont activées) — n'empêche jamais la demande d'aboutir. */
+async function ping(u: string, id: string, title: string, body: string) {
+  try { await pushToUser(u, { title, body, url: appLink(id), tag: `bk-${id}` }); } catch (_) { /* pas de clés ou pas d'appareil */ }
+}
 
 type Range = { from: string; to: string };
 const DAY = 86400000;
@@ -104,10 +113,11 @@ Deno.serve(async (req) => {
       const since = new Date(Date.now() - 24 * 3600 * 1000).toISOString();
       const { count: day } = await admin.from("booking_requests").select("id", { count: "exact", head: true }).eq("user_id", u).gte("created_at", since);
       if ((day || 0) >= 20) return json({ error: "trop_de_demandes" }, 429);
-      const { error } = await admin.from("booking_requests").insert({ user_id: u, slot_start: slot.start, slot_end: slot.end, form });
+      const { data: row, error } = await admin.from("booking_requests").insert({ user_id: u, slot_start: slot.start, slot_end: slot.end, form }).select("id").single();
       if (error) throw error;
       const who = [form.firstName, form.lastName].filter(Boolean).join(" ") || form.company;
-      await notify(u, `Nouvelle demande de rendez-vous : ${who}`, `${who} demande un rendez-vous le ${fmt(slot.start)}.\n\nÉvénement : ${form.eventType || "—"} le ${form.eventDate || "—"} à ${form.eventLocation || "—"}\nE-mail : ${form.email}\nTéléphone : ${form.phone || "—"}\n\nMessage :\n${form.message || "—"}\n\nValidez ou proposez un autre créneau depuis Cabine.`);
+      await ping(u, row.id, "Nouvelle demande de rendez-vous", `${who} · ${fmt(slot.start)}${form.eventType ? " · " + form.eventType : ""}`);
+      await notify(u, `Nouvelle demande de rendez-vous : ${who}`, `${who} demande un rendez-vous le ${fmt(slot.start)}.\n\nÉvénement : ${form.eventType || "—"} le ${form.eventDate || "—"} à ${form.eventLocation || "—"}\nE-mail : ${form.email}\nTéléphone : ${form.phone || "—"}\n\nMessage :\n${form.message || "—"}\n\nValidez ou proposez un autre créneau dans Cabine :\n${appLink(row.id)}`);
       await notify(u, "Votre demande de rendez-vous a bien été reçue", `Bonjour ${form.firstName || who},\n\nJ'ai bien reçu votre demande de rendez-vous pour le ${fmt(slot.start)}. Je vous confirme le créneau très vite.\n\nÀ bientôt !`, form.email);
       return json({ ok: true });
     }
@@ -118,7 +128,8 @@ Deno.serve(async (req) => {
       if (!p) return json({ error: "creneau_indisponible" }, 409);
       await admin.from("booking_requests").update({ status: "pending", slot_start: p.start, slot_end: p.end, form: { ...r.form, picked: "1" } }).eq("id", r.id);
       const who = [r.form?.firstName, r.form?.lastName].filter(Boolean).join(" ") || r.form?.company;
-      await notify(r.user_id, `${who} a choisi un créneau`, `${who} a choisi le ${fmt(p.start)}. Validez-le depuis Cabine.`);
+      await ping(r.user_id, r.id, `${who} a choisi un créneau`, `${fmt(p.start)} · à valider dans Cabine`);
+      await notify(r.user_id, `${who} a choisi un créneau`, `${who} a choisi le ${fmt(p.start)}.\n\nValidez-le dans Cabine :\n${appLink(r.id)}`);
       return json({ ok: true });
     }
     return json({ error: "action_inconnue" }, 400);

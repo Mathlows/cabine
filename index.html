@@ -508,6 +508,18 @@ function draftFromEvent(ev){
   return newDoc('facture', {profileId:p?.id||'', clientId:ev.clientId||'', eventId:ev.id, eventDate:ev.date, eventType:ev.eventType||'', eventLocation:ev.location||'', lines, notes: prev?.notes||'', remisePct: prev?.remisePct||0, copiedFrom: prev?.number||''});
 }
 
+/* Devis provisoire d'un rendez-vous client : préparé avec les réponses du formulaire de réservation */
+function rdvDevis(ev){ return ev && S.docs.find(d=>d.type==='devis' && d.rdvId===ev.id && d.status!=='annulee'); }
+async function makeRdvDevis(ev){
+  const b = ev.bookingId ? S.bookings.find(x=>x.id===ev.bookingId) : null; const f=b?.form||{};
+  const p = S.profiles.find(x=>x.id===ev.profileId) || activeProfile();
+  const date=f.eventDate||'', loc=f.eventLocation||'', type=f.eventType||ev.eventType||'';
+  const prev = ev.clientId ? lastInvoiceForClient(ev.clientId, p?.id) : null;
+  const lines = prev ? refreshLines(prev.lines, date, loc) : [{id:uid(), title:`Prestation DJ${type?' – '+type:''}`, description:[date?fdateLong(date):'', loc].filter(Boolean).join(' – '), qty:1, unit:0, vat: vatOn(p)?20:0}];
+  const d = newDoc('devis',{profileId:p?.id||'', clientId:ev.clientId||'', rdvId:ev.id, eventDate:date, eventType:type, eventLocation:loc, lines, notes:prev?.notes||'', remisePct:prev?.remisePct||0, copiedFrom:prev?.number||''});
+  await put('docs', d); return d;
+}
+
 /* ---------------- facturation mensuelle : toutes les dates du mois sur une seule facture ---------------- */
 const monthKey = date => (date||'').slice(0,7);
 const monthLabel = m => m ? MONTHS[Number(m.slice(5,7))-1]+' '+m.slice(0,4) : '';
@@ -1662,6 +1674,12 @@ function EventForm({event, preset, onClose}){
       <div class="row sb"><span class="tiny">${linked.copiedFrom?'Reprise de '+linked.copiedFrom:''}${t.pct?' · remise '+t.pct+' %':''}</span><b>${eur(t.ttc)}</b></div>
       <div class="row"><button class="btn sm pri" onClick=${()=>open('doc',{doc:linked})}>${linked.number?'Voir la facture':'Modifier la facture'}</button>${!linked.number && html`<button class="btn sm" onClick=${()=>open('doc',{doc:linked})}>Finaliser…</button>`}</div>
     </div>`; })()}
+    ${event && f.kind==='rdv' && (()=>{ const dv=rdvDevis(f); const t=dv&&computeTotals(dv,docProfile(dv)); return html`<div class="card stack">
+      <div class="row sb"><div style="font-weight:600">${dv?.number?'Devis '+dv.number:'Devis provisoire'}</div>${dv ? html`<span class=${'pill '+docState(dv).k}>${docState(dv).l}</span>` : ''}</div>
+      ${dv ? html`<div class="row sb"><span class="tiny">${[dv.eventType, dv.eventDate&&fdate(dv.eventDate), dv.eventLocation].filter(Boolean).join(' · ')||'Prestation à chiffrer'}</span><b>${eur(t.ttc)}</b></div>`
+           : html`<div class="tiny">Préparez le devis de la prestation avec les infos de ce rendez-vous${f.bookingId?' (date, lieu et type de soirée de la demande)':''}.</div>`}
+      <div class="row"><button class="btn sm pri" onClick=${async()=>{ const d=dv||await makeRdvDevis(f); open('doc',{doc:d}); }}>${dv?'Ouvrir le devis':'Préparer le devis'}</button></div>
+    </div>`; })()}
     ${event && html`<button class="btn danger" onClick=${()=>{ const inv=S.docs.find(x=>x.id===event.invoiceId); const draft=inv&&inv.status==='brouillon';
       open('confirm',{title:'Supprimer cette date ?', text: draft?(inv.monthly?'La date sera retirée de la facture du mois.':'La facture brouillon liée sera supprimée aussi.'):'La date sera retirée de l’agenda.', yes:'Supprimer', danger:true, onYes:async()=>{ if(draft) await detachEventInvoice(event); del('events',event.id); onClose(); }}); }}>Supprimer cette date</button>`}
     <datalist id="evtypes2">${EVENT_TYPES.map(x=>html`<option value=${x}/>`)}</datalist>
@@ -2182,6 +2200,7 @@ function HomeView(){
     <${ImportCard}/>
     ${backend.mode==='supabase' && html`<${RelanceBanner}/>`}
     <${UrssafBanner}/>
+    ${backend.mode==='supabase' && S.bookings.some(b=>b.status==='pending'||b.status==='proposed') && html`<${BookingList}/>`}
     ${pastDrafts.length>0 && html`<div class="notice warn">${pastDrafts.length} prestation${pastDrafts.length>1?'s sont passées':' est passée'} sans facture finalisée. <button class="btn ghost sm" onClick=${()=>open('doc',{doc:pastDrafts[0]})}>Voir</button></div>`}
     <div class="stats">
       <button class="card stat" style="text-align:left;font:inherit;color:inherit;cursor:pointer" onClick=${()=>open('yearDetail',{year:y})}><div class="lab">Facturé en ${y}</div><div class="val">${eur(billedYear)}</div><div class="sub">${billedYearDocs.length} facture${billedYearDocs.length>1?'s':''}${avYear.length?` − ${avYear.length} avoir${avYear.length>1?'s':''}`:''}${vatOn(p)?', hors taxes':''} · voir le détail</div></button>
@@ -2542,10 +2561,12 @@ function BookingView({id, onClose}){
     if(!client){ client={...emptyClient(), kind:f.kind==='entreprise'?'entreprise':'particulier', firstName:f.firstName||'', lastName:f.lastName||'', company:f.company||'', contact:f.kind==='entreprise'?[f.firstName,f.lastName].filter(Boolean).join(' '):'', siret:(f.siret||'').replace(/\s/g,''), siren:(f.siret||'').replace(/\s/g,'').slice(0,9), address:f.address||'', cp:f.cp||'', city:f.city||'', email:f.email||'', phone:f.phone||'', fromBooking:true}; await put('clients',client); }
     const s=parisParts(b.slot_start), e=parisParts(b.slot_end);
     const notes = ['Préparation du rendez-vous :', ...answers.filter(a=>!['Type','Société','SIRET','Nom','Adresse','E-mail','Téléphone'].includes(a[0])).map(a=>`• ${a[0]} : ${a[1]}`)].join('\n');
-    await put('events',{id:uid(), kind:'rdv', profileId:activeProfile()?.id||'', clientId:client.id, date:s.date, start:s.time, end:e.time, eventType:f.eventType||'', location:st.booking?.place||'', notes, invoiceId:'', bookingId:b.id});
+    const ev={id:uid(), kind:'rdv', profileId:activeProfile()?.id||'', clientId:client.id, date:s.date, start:s.time, end:e.time, eventType:f.eventType||'', location:st.booking?.place||'', notes, invoiceId:'', bookingId:b.id};
+    await put('events',ev);
+    if(!rdvDevis(ev)) await makeRdvDevis(ev);
     await sb.from('booking_requests').update({status:'accepted'}).eq('id',b.id);
     await mail(f.email, 'Rendez-vous confirmé', `Bonjour ${f.firstName||bookingName(f)},\n\nJe vous confirme notre rendez-vous le ${fdt(b.slot_start)}${st.booking?.place?' ('+st.booking.place+')':''}.\n\nÀ très vite,\n${activeProfile()?.ownerName||''}`);
-    toast('Rendez-vous validé et ajouté à l’agenda'); onClose();
+    toast('Rendez-vous validé : ajouté à l’agenda avec un devis provisoire'); onClose();
   }
   async function propose(){
     const list=props.filter(x=>x.date&&x.time).map(x=>{ const st0=new Date(`${x.date}T${x.time}:00`); return {start:st0.toISOString(), end:new Date(st0.getTime()+dur*60000).toISOString()}; });
@@ -2641,6 +2662,12 @@ function App(){
     const ev=S.events.find(e=>e.id===route.slice(3));
     history.replaceState(null,'','#agenda'); setRoute('agenda');
     if(ev) setTimeout(()=>open('event',{event:ev}), 50); else toast('Cette date n’existe plus.');
+  },[route]);
+  useEffect(()=>{
+    // lien « #bk-<id> » (notification ou e-mail de demande de rendez-vous) : ouvrir la demande
+    if(!route.startsWith('bk-')) return;
+    const id=route.slice(3); history.replaceState(null,'','#accueil'); setRoute('accueil');
+    let n=0; const t=setInterval(()=>{ if(S.bookings.some(b=>b.id===id)){ clearInterval(t); open('booking',{id}); } else if(++n>40){ clearInterval(t); toast('Cette demande n’existe plus.'); } }, 150);
   },[route]);
   useEffect(()=>{
     if(!('serviceWorker' in navigator)) return;
