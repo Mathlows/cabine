@@ -12,19 +12,20 @@
   --f-display:"Bricolage Grotesque", "Avenir Next", system-ui, sans-serif;
   --f-body:"Instrument Sans", system-ui, -apple-system, "Segoe UI", sans-serif;
   --r:10px; --shadow:0 1px 2px rgba(20,26,43,.06),0 6px 24px rgba(20,26,43,.07);
+  --chart:#3046c9; --chart-hi:#1f2f99;
 }
 @media (prefers-color-scheme: dark){:root:not([data-theme="light"]){
   --bg:#0f1220; --surface:#171b2c; --surface-2:#20253a; --line:#2c3250;
   --ink:#eceef6; --ink-2:#a9aec4; --ink-3:#737a95;
   --accent:#8c9cff; --accent-ink:#0f1220; --accent-soft:#252c52;
   --ok:#5fd39a; --ok-soft:#173327; --warn:#f2b45c; --warn-soft:#3a2a12; --bad:#ff8a80; --bad-soft:#3d1a1a;
-  --shadow:0 1px 2px rgba(0,0,0,.3),0 6px 24px rgba(0,0,0,.3); color-scheme:dark}}
+  --shadow:0 1px 2px rgba(0,0,0,.3),0 6px 24px rgba(0,0,0,.3); --chart:#6f82f0; --chart-hi:#8c9cff; color-scheme:dark}}
 :root[data-theme="dark"]{
   --bg:#0f1220; --surface:#171b2c; --surface-2:#20253a; --line:#2c3250;
   --ink:#eceef6; --ink-2:#a9aec4; --ink-3:#737a95;
   --accent:#8c9cff; --accent-ink:#0f1220; --accent-soft:#252c52;
   --ok:#5fd39a; --ok-soft:#173327; --warn:#f2b45c; --warn-soft:#3a2a12; --bad:#ff8a80; --bad-soft:#3d1a1a;
-  --shadow:0 1px 2px rgba(0,0,0,.3),0 6px 24px rgba(0,0,0,.3); color-scheme:dark}
+  --shadow:0 1px 2px rgba(0,0,0,.3),0 6px 24px rgba(0,0,0,.3); --chart:#6f82f0; --chart-hi:#8c9cff; color-scheme:dark}
 *{box-sizing:border-box}
 html,body{height:100%}
 body{background:var(--bg);color:var(--ink);font-family:var(--f-body);font-size:15px;line-height:1.45;font-variant-numeric:tabular-nums}
@@ -166,6 +167,12 @@ label.f textarea{min-height:76px;resize:vertical}
   .ed-bar-total b{font-family:var(--f-display);font-size:1.05rem;white-space:nowrap}
   .ed-bar .btn.sm{min-height:38px;padding:6px 10px}
 }
+.ca-scroll{position:relative;overflow-x:auto;-webkit-overflow-scrolling:touch}
+.ca-grid{stroke:var(--line);stroke-width:1}.ca-base{stroke:var(--ink-3);stroke-width:1}
+.ca-axis{fill:var(--ink-3);font-size:9.5px;font-family:var(--f-body)}.ca-axis.fut{opacity:.5}
+.ca-bar{fill:var(--chart)}.ca-bar.on{fill:var(--chart-hi)}.ca-neg{fill:var(--bad)}
+.ca-tip{position:absolute;top:4px;transform:translateX(-50%);background:var(--surface);border:1px solid var(--line);box-shadow:var(--shadow);border-radius:8px;padding:6px 10px;font-size:.8rem;pointer-events:none;white-space:nowrap;color:var(--ink)}
+.ca-table{border-collapse:collapse;width:100%;font-size:.9rem}.ca-table td,.ca-table th{text-align:left;padding:5px 8px;border-bottom:1px solid var(--line)}.ca-table td:last-child,.ca-table th:last-child{text-align:right}
 .sheet.wide{max-width:1280px}
 .ed-grid{display:grid;grid-template-columns:minmax(0,1fr);gap:20px}
 .ed-form{display:flex;flex-direction:column;gap:16px;min-width:0}
@@ -2002,6 +2009,158 @@ function YearDetail({year, onClose}){
 }
 /* Chiffre d'affaires HT d'un document : négatif pour un avoir, nul pour une facture annulée */
 const caOf = d => d.status==='annulee' ? 0 : (d.type==='avoir' ? -1 : 1) * computeTotals(d,docProfile(d)).ht;
+/* ---------------- chiffre d'affaires : données mensuelles ---------------- */
+const ymKey = d => d.slice(0,7);
+function monthsBetween(a, b){ const out=[]; let y=+a.slice(0,4), m=+a.slice(5,7); const ey=+b.slice(0,4), em=+b.slice(5,7); while(y<ey || (y===ey && m<=em)){ out.push(`${y}-${String(m).padStart(2,'0')}`); m++; if(m>12){ m=1; y++; } } return out; }
+/* Facturé (HT, avoirs déduits, date du document) ou encaissé (montant payé, date de paiement) par mois */
+function caByMonth(metric){
+  const p=activeProfile(); const m={};
+  for(const d of S.docs){
+    if(p && d.profileId!==p.id) continue;
+    if(metric==='encaisse'){
+      if(d.type==='facture' && d.status==='payee' && d.paidAt){ const k=ymKey(d.paidAt); m[k]=(m[k]||0)+computeTotals(d,docProfile(d)).ttc; }
+      // un avoir sur une facture déjà payée est un remboursement : il vient en déduction le mois de l'avoir
+      if(d.type==='avoir' && d.number && d.status!=='annulee'){ const inv=S.docs.find(x=>x.id===d.creditOf); if(inv?.status==='payee'){ const k=ymKey(d.issueDate); m[k]=(m[k]||0)-computeTotals(d,docProfile(d)).ttc; } }
+    } else if((d.type==='facture'||d.type==='avoir') && d.number && d.issueDate){ const k=ymKey(d.issueDate); m[k]=(m[k]||0)+caOf(d); }
+  }
+  return m;
+}
+function caPeriod(kind){
+  const t=todayISO(), y=+t.slice(0,4);
+  if(kind==='year') return {from:`${y}-01`, to:`${y}-12`, label:`${y}`, prev:{from:`${y-1}-01`, to:`${y-1}-12`, label:`${y-1}`}};
+  if(kind==='last') return {from:`${y-1}-01`, to:`${y-1}-12`, label:`${y-1}`, prev:{from:`${y-2}-01`, to:`${y-2}-12`, label:`${y-2}`}};
+  if(kind==='12m'){ const end=t.slice(0,7); const s=new Date(y, +t.slice(5,7)-12, 1); const from=iso(s).slice(0,7); const ps=new Date(y, +t.slice(5,7)-24, 1), pe=new Date(y, +t.slice(5,7)-13, 1);
+    return {from, to:end, label:'12 derniers mois', prev:{from:iso(ps).slice(0,7), to:iso(pe).slice(0,7), label:'les 12 mois précédents', vs:'par rapport aux 12 mois précédents'}}; }
+  const keys=S.docs.filter(d=>d.number && (d.issueDate||d.paidAt)).map(d=>ymKey(d.issueDate||d.paidAt)).sort();
+  return {from: keys[0]||t.slice(0,7), to:t.slice(0,7), label:'toute la période', prev:null};
+}
+const MSH = ['jan','fév','mar','avr','mai','jun','jul','aoû','sep','oct','nov','déc'];
+const monthName = k => MONTHS[+k.slice(5,7)-1]+' '+k.slice(0,4);
+const cap1 = t => t ? t.charAt(0).toUpperCase()+t.slice(1) : t;
+function niceStep(max){ if(max<=0) return 100; const raw=max/4, mag=Math.pow(10,Math.floor(Math.log10(raw))); const f=raw/mag; return (f<=1?1:f<=2?2:f<=2.5?2.5:f<=5?5:10)*mag; }
+const kfmt = v => v>=10000 ? (Math.round(v/100)/10).toLocaleString('fr-FR')+' k' : Math.round(v).toLocaleString('fr-FR').replace(/[  ]/g,' ');
+
+function CAChart(){
+  useStore();
+  const [period,setPeriod]=useState(lsGet('cabine-ca-period')||'year');
+  const [metric,setMetric]=useState(lsGet('cabine-ca-metric')||'facture');
+  const [hover,setHover]=useState(null); const [table,setTable]=useState(false);
+  const P=caPeriod(period); const data=caByMonth(metric);
+  const months=monthsBetween(P.from, P.to);
+  const vals=months.map(k=>r2(data[k]||0));
+  const total=r2(vals.reduce((a,b)=>a+b,0));
+  const now=todayISO().slice(0,7); const elapsed=months.filter(k=>k<=now).length||1;
+  const best=months.reduce((b,k,i)=>vals[i]>(b?b.v:-Infinity)?{k,v:vals[i]}:b,null);
+  const prevTotal = P.prev ? r2(monthsBetween(P.prev.from, P.prev.to).reduce((a,k)=>a+(data[k]||0),0)) : null;
+  // à date égale pour « cette année » : comparer janvier→mois en cours
+  const ytd = period==='year' && P.prev ? r2(monthsBetween(P.prev.from, (+P.prev.from.slice(0,4))+'-'+now.slice(5,7)).reduce((a,k)=>a+(data[k]||0),0)) : null;
+  const ref = ytd!==null ? ytd : prevTotal; const delta = ref ? Math.round((total-ref)/Math.abs(ref)*100) : null;
+  // géométrie
+  const W=Math.max(300, 44+8+months.length*24), H=200, L=44, R=8, T=12, B=26;
+  const max=Math.max(...vals,0), step=niceStep(max), top=Math.max(step, Math.ceil(max/step)*step);
+  const yv=v=>T+(H-T-B)*(1-Math.max(0,v)/top);
+  const band=(W-L-R)/months.length, bw=Math.min(24, Math.max(3, band-2));
+  const ticks=[]; for(let v=0; v<=top+0.01; v+=step) ticks.push(v);
+  const every = months.length>24 ? 6 : months.length>12 ? 3 : 1;
+  const tip = hover!==null ? {k:months[hover], v:vals[hover], x:L+band*hover+band/2} : null;
+  const sel=(k,set,key)=>()=>{ set(k); lsSet(key,k); setHover(null); };
+  return html`<div class="card stack ca-card">
+    <div class="row sb" style="align-items:flex-start">
+      <div><div class="lab" style="font-size:.75rem;text-transform:uppercase;letter-spacing:.06em;color:var(--ink-2)">${metric==='encaisse'?'Chiffre d’affaires encaissé':'Chiffre d’affaires facturé'} · ${P.label}</div>
+        <div style="font-family:var(--f-display);font-size:1.5rem;font-weight:700;white-space:nowrap">${eur(total)}</div>
+        <div class="tiny">${delta!==null && isFinite(delta) ? html`<span style=${`color:${delta>=0?'var(--ok)':'var(--bad)'}`}>${delta>=0?'▲':'▼'} ${Math.abs(delta)} %</span> ${ytd!==null?`par rapport à la même période de ${P.prev.label}`:(P.prev.vs||`par rapport à ${P.prev.label}`)} · `:''}moyenne ${eur(total/elapsed)} / mois${best&&best.v>0?` · meilleur mois : ${monthName(best.k)} (${eur(best.v)})`:''}</div></div>
+      <div class="seg">${[['facture','Facturé'],['encaisse','Encaissé']].map(([k,l])=>html`<button class=${metric===k?'on':''} onClick=${sel(k,setMetric,'cabine-ca-metric')}>${l}</button>`)}</div>
+    </div>
+    <div class="row" style="gap:6px">${[['year','Cette année'],['last','L’an dernier'],['12m','1 an'],['all','Toute la période']].map(([k,l])=>html`<button class=${'btn sm'+(period===k?' pri':'')} onClick=${sel(k,setPeriod,'cabine-ca-period')}>${l}</button>`)}</div>
+    ${table ? html`<div style="overflow-x:auto"><table class="ca-table"><thead><tr><th>Mois</th><th>${metric==='encaisse'?'Encaissé':'Facturé HT'}</th></tr></thead><tbody>${months.map((k,i)=>html`<tr><td style="text-transform:capitalize">${monthName(k)}</td><td>${eur(vals[i])}</td></tr>`)}<tr><td><b>Total</b></td><td><b>${eur(total)}</b></td></tr></tbody></table></div>`
+    : html`<div class="ca-scroll" onMouseLeave=${()=>setHover(null)}>
+      <svg viewBox=${`0 0 ${W} ${H}`} width=${months.length>24?W:undefined} height=${months.length>24?H:undefined} role="img" aria-label=${`Histogramme du chiffre d’affaires ${metric==='encaisse'?'encaissé':'facturé'} par mois, ${P.label}`} style=${months.length>24?'display:block;max-width:none':'display:block;width:100%;height:auto'}>
+        ${ticks.map(v=>html`<g><line x1=${L} x2=${W-R} y1=${yv(v)} y2=${yv(v)} class="ca-grid"/><text x=${L-6} y=${yv(v)+4} class="ca-axis" text-anchor="end">${kfmt(v)}</text></g>`)}
+        ${months.map((k,i)=>{ const v=vals[i], x=L+band*i+(band-bw)/2, y=yv(v), h=Math.max(0,(H-B)-y), r=Math.min(4,h,bw/2); const fut=k>now;
+          return html`<g onMouseEnter=${()=>setHover(i)} onClick=${()=>setHover(hover===i?null:i)} style="cursor:pointer">
+            <rect x=${L+band*i} y=${T} width=${band} height=${H-B-T} fill="transparent"/>
+            ${h>0.5 && html`<path class=${'ca-bar'+(hover===i?' on':'')} d=${`M${x},${H-B} L${x},${y+r} Q${x},${y} ${x+r},${y} L${x+bw-r},${y} Q${x+bw},${y} ${x+bw},${y+r} L${x+bw},${H-B} Z`}/>`}
+            ${v<0 && html`<rect x=${x} y=${H-B} width=${bw} height=${2} class="ca-neg"/>`}
+            ${(i%every===0) && html`<text x=${L+band*i+band/2} y=${H-8} class=${'ca-axis'+(fut?' fut':'')} text-anchor="middle">${every>=3 && (+k.slice(5,7)===1 || i===0) ? MSH[+k.slice(5,7)-1]+' '+k.slice(2,4) : MSH[+k.slice(5,7)-1]}</text>`}
+          </g>`; })}
+        <line x1=${L} x2=${W-R} y1=${H-B} y2=${H-B} class="ca-base"/>
+      </svg>
+      ${tip && html`<div class="ca-tip" style=${months.length>24 ? `left:${Math.min(Math.max(tip.x,70),W-70)}px` : `left:clamp(70px, ${tip.x/W*100}%, calc(100% - 70px))`}><b style="text-transform:capitalize">${monthName(tip.k)}</b><br/>${eur(tip.v)}</div>`}
+    </div>`}
+    <div class="row sb tiny"><span>${metric==='encaisse'?'Montants réellement payés, au mois du paiement. Les factures importées sont comptées à leur date d’échéance.':'Factures numérotées hors taxes, au mois de la facture, avoirs déduits.'}</span><button class="btn ghost sm" style="min-height:0;padding:0 4px" onClick=${()=>setTable(x=>!x)}>${table?'Voir le graphique':'Voir le tableau'}</button></div>
+  </div>`;
+}
+
+/* ---------------- aide à la déclaration URSSAF (micro-entreprise) ---------------- */
+const URSSAF_ACT = {
+  bic_services:{l:'Prestations de services commerciales ou artisanales (BIC)', rate:21.2, vl:1.7, cfp:0.1},
+  bnc:{l:'Profession libérale, régime général (BNC)', rate:25.6, vl:2.2, cfp:0.2},
+  cipav:{l:'Profession libérale affiliée à la CIPAV (BNC)', rate:23.2, vl:2.2, cfp:0.2},
+  vente:{l:'Vente de marchandises (BIC)', rate:12.3, vl:1.0, cfp:0.1},
+};
+const urssafCfg = () => ({period:'trimestrielle', activity:'bic_services', rate:null, cfp:null, vl:false, declared:{}, ...(settings().urssaf||{})});
+function urssafRate(c){ return c.rate!=null && c.rate!=='' ? Number(c.rate) : URSSAF_ACT[c.activity]?.rate||0; }
+function urssafPeriods(c){
+  const enc=caByMonth('encaisse'); const t=todayISO(); const y=+t.slice(0,4); const out=[];
+  const last = (yy,mm)=>new Date(yy,mm,0).getDate();
+  for(let yy=y; yy>=y-2; yy--){
+    if(c.period==='mensuelle'){ for(let m=12;m>=1;m--){ const k=`${yy}-${String(m).padStart(2,'0')}`; if(k>t.slice(0,7)) continue; const ny=m===12?yy+1:yy, nm=m===12?1:m+1;
+      out.push({key:k, label:monthName(k), months:[k], deadline:`${ny}-${String(nm).padStart(2,'0')}-${last(ny,nm)}`, open:k===t.slice(0,7)}); } }
+    else { for(let q=4;q>=1;q--){ const ms=[1,2,3].map(i=>`${yy}-${String((q-1)*3+i).padStart(2,'0')}`); if(ms[0]>t.slice(0,7)) continue;
+      const dl = q===4 ? `${yy+1}-01-31` : `${yy}-${String(q*3+1).padStart(2,'0')}-${last(yy,q*3+1)}`;
+      out.push({key:`${yy}-T${q}`, label:`${q===1?'1er':q+'e'} trimestre ${yy}`, months:ms, deadline:dl, open:ms.includes(t.slice(0,7))}); } }
+  }
+  const rate=urssafRate(c), cfp=Number(c.cfp ?? URSSAF_ACT[c.activity]?.cfp ?? 0.1)||0, vl=c.vl ? (URSSAF_ACT[c.activity]?.vl||0) : 0;
+  const start=c.start||todayISO();
+  return out.map(p=>{ const ca=r2(p.months.reduce((a,k)=>a+(enc[k]||0),0)); const cot=r2(ca*rate/100), f=r2(ca*cfp/100), v=r2(ca*vl/100);
+    // échéance passée avant la première utilisation de cette aide : déjà déclarée (hors Cabine), sauf si décochée
+    const before = p.deadline < start;
+    return {...p, ca, cot, cfp:f, vl:v, total:r2(cot+f+v), before, declared: c.declared[p.key]===undefined ? before : !!c.declared[p.key]}; });
+}
+/* Prochaine déclaration à faire : période terminée, non déclarée, la plus ancienne dont l'échéance n'est pas dépassée de plus de 60 jours */
+function urssafDue(){
+  if(activeProfile()?.status!=='micro' || !settings().urssaf?.start) return null;   // rappel actif une fois l'aide ouverte
+  const t=todayISO(); const ps=urssafPeriods(urssafCfg()).filter(p=>!p.open && !p.declared && addDays(p.deadline,60)>=t).sort((a,b)=>a.deadline.localeCompare(b.deadline));
+  return ps[0]||null;
+}
+function UrssafBanner(){
+  useStore(); const p=urssafDue(); if(!p) return null;
+  const days=Math.round((parseISO(p.deadline)-parseISO(todayISO()))/86400000); if(days>20) return null;
+  return html`<div class="notice row sb" style=${`border-left:4px solid ${days<0?'var(--bad)':'var(--accent)'}`}><span><b>Déclaration URSSAF${days<0?' en retard':''} :</b> ${p.label}, chiffre d’affaires encaissé ${eur(p.ca)}, à déclarer ${days<0?`depuis le ${fdate(p.deadline)}`:`avant le ${fdate(p.deadline)}`}.</span><button class="btn sm" onClick=${()=>location.hash='#urssaf'}>Voir</button></div>`;
+}
+function UrssafView(){
+  useStore(); const c=urssafCfg(); const set=patch=>saveSettings({urssaf:{...c, ...patch}});
+  useEffect(()=>{ if(!settings().urssaf?.start) saveSettings({urssaf:{...urssafCfg(), start:todayISO()}}); },[]);
+  const ps=urssafPeriods(c); const prof=activeProfile();
+  const yearCA=r2(ps.filter(p=>p.key.startsWith(todayISO().slice(0,4))).reduce((a,p)=>a+p.ca,0));
+  const copy=v=>navigator.clipboard.writeText(String(v).replace('.',',')).then(()=>toast('Montant copié : '+v.toLocaleString('fr-FR')),()=>toast('Copie impossible : sélectionnez le montant'));
+  return html`<div class="wrap">
+    <div class="row sb"><h1>Déclaration URSSAF</h1><a class="btn sm" href="https://www.autoentrepreneur.urssaf.fr" target="_blank" rel="noopener">Ouvrir le site de l’URSSAF</a></div>
+    ${prof?.status!=='micro' && html`<div class="notice warn small">Cette aide concerne la micro-entreprise. Votre profil actif est « ${STATUSES[prof?.status]||'—'} ».</div>`}
+    <p class="muted" style="margin:0">En micro-entreprise, vous déclarez le chiffre d’affaires <b>encaissé</b> (les paiements reçus) sur la période, pas les factures émises. Cabine additionne les factures marquées « payées » à leur date de paiement : pensez à les marquer payées au fur et à mesure.</p>
+    <div class="card stack">
+      <div class="fields">
+        <${Sel} label="Votre déclaration" value=${c.period} onChange=${v=>set({period:v})} options=${[['trimestrielle','Trimestrielle'],['mensuelle','Mensuelle']]}/>
+        <${Sel} label="Votre activité" value=${c.activity} onChange=${v=>set({activity:v, rate:null})} options=${Object.entries(URSSAF_ACT).map(([k,a])=>[k,a.l])}/>
+        <${F} label=${`Taux de cotisations (%) · 2026 : ${URSSAF_ACT[c.activity]?.rate.toString().replace('.',',')} %`} type="number" step="0.1" value=${c.rate ?? URSSAF_ACT[c.activity]?.rate} onInput=${v=>set({rate:v===''?null:Number(v)})}/>
+        <${F} label="Formation professionnelle (CFP, %)" type="number" step="0.1" value=${c.cfp ?? URSSAF_ACT[c.activity]?.cfp ?? 0.1} onInput=${v=>set({cfp:v===''?null:Number(v)})}/>
+      </div>
+      <label class="check"><input type="checkbox" checked=${!!c.vl} onChange=${e=>set({vl:e.target.checked})}/><span>J’ai opté pour le versement libératoire de l’impôt sur le revenu (${(URSSAF_ACT[c.activity]?.vl||0).toString().replace('.',',')} %)</span></label>
+      <div class="tiny">Taux 2026 indicatifs, à vérifier sur votre espace URSSAF : ils dépendent de votre activité déclarée, et l’ACRE éventuelle les réduit la première année. La CFP est de 0,1 % pour les commerçants, 0,2 % pour les libéraux et 0,3 % pour les artisans.</div>
+    </div>
+    <div class="row sb small"><span>Encaissé depuis le 1er janvier : <b>${eur(yearCA)}</b></span>${prof?.caCeiling ? html`<span class="tiny">${Math.round(yearCA/prof.caCeiling*100)} % du plafond (${eur(prof.caCeiling)})</span>`:''}</div>
+    <div class="list">${ps.slice(0, c.period==='mensuelle'?18:8).map(p=>{ const late=!p.declared && !p.open && p.deadline<todayISO(); return html`<div class="item" style="flex-wrap:wrap;align-items:flex-start">
+      <div class="grow" style="min-width:200px"><div class="t">${cap1(p.label)}${p.open?html` <span class="pill">en cours</span>`:''}</div>
+        <div class="tiny">${p.open?`À déclarer après la fin de la période, avant le ${fdate(p.deadline)}`:p.declared?(p.before && c.declared[p.key]===undefined?'Déclaré avant Cabine':'Déclaré'):`À déclarer avant le ${fdate(p.deadline)}`}${late?html` · <span style="color:var(--bad)">échéance dépassée</span>`:''}</div>
+        <div class="tiny">Cotisations estimées ${eur(p.cot)}${p.cfp?` + CFP ${eur(p.cfp)}`:''}${p.vl?` + impôt ${eur(p.vl)}`:''} = <b>${eur(p.total)}</b></div></div>
+      <div style="text-align:right;display:flex;flex-direction:column;gap:4px;align-items:flex-end">
+        <button class="btn sm" title="Copier le montant à déclarer" onClick=${()=>copy(p.ca)}>${eur(p.ca)}</button>
+        ${!p.open && html`<label class="check small" style="align-items:center"><input type="checkbox" checked=${p.declared} onChange=${e=>set({declared:{...c.declared, [p.key]:e.target.checked}})}/><span>Déclaré</span></label>`}
+      </div></div>`; })}</div>
+    <div class="tiny">Touchez un montant pour le copier, puis collez-le dans votre déclaration sur autoentrepreneur.urssaf.fr. Cochez « Déclaré » une fois la déclaration faite : le rappel de l’accueil disparaît.</div>
+  </div>`;
+}
+
 /* ---------------- accueil ---------------- */
 function HomeView(){
   useStore(); const p=activeProfile(); const y=todayISO().slice(0,4);
@@ -2022,6 +2181,7 @@ function HomeView(){
     <div><h1>Bonjour${p?.ownerName?' '+p.ownerName.split(' ')[0]:''}</h1><div class="muted">${fdateLong(todayISO())}</div></div>
     <${ImportCard}/>
     ${backend.mode==='supabase' && html`<${RelanceBanner}/>`}
+    <${UrssafBanner}/>
     ${pastDrafts.length>0 && html`<div class="notice warn">${pastDrafts.length} prestation${pastDrafts.length>1?'s sont passées':' est passée'} sans facture finalisée. <button class="btn ghost sm" onClick=${()=>open('doc',{doc:pastDrafts[0]})}>Voir</button></div>`}
     <div class="stats">
       <button class="card stat" style="text-align:left;font:inherit;color:inherit;cursor:pointer" onClick=${()=>open('yearDetail',{year:y})}><div class="lab">Facturé en ${y}</div><div class="val">${eur(billedYear)}</div><div class="sub">${billedYearDocs.length} facture${billedYearDocs.length>1?'s':''}${avYear.length?` − ${avYear.length} avoir${avYear.length>1?'s':''}`:''}${vatOn(p)?', hors taxes':''} · voir le détail</div></button>
@@ -2029,6 +2189,7 @@ function HomeView(){
       <div class="card stat"><div class="lab">À encaisser</div><div class="val">${eur(toCollect)}</div><div class="sub">${late.length? late.length+' facture'+(late.length>1?'s':'')+' en retard':'Aucun retard'}</div></div>
       <div class="card stat"><div class="lab">Brouillons</div><div class="val">${drafts.length}</div><div class="sub">${eur(drafts.reduce((a,d)=>a+tot(d),0))} prévus</div></div>
     </div>
+    <${CAChart}/>
     <div class="sect"><div class="row sb"><div class="lab">Prochaines dates</div><a class="btn ghost sm" href="#agenda">Agenda</a></div>
       ${upcoming.length ? html`<${EventList} events=${upcoming}/>` : html`<div class="card empty"><h3>Aucune date à venir</h3><p>Ajoutez une soirée : la facture brouillon se crée toute seule.</p><button class="btn pri" onClick=${()=>open('event')}>Ajouter une date</button></div>`}</div>
     ${late.length>0 && html`<div class="sect"><div class="lab">En retard de paiement</div><${DocList} docs=${late}/></div>`}
@@ -2060,6 +2221,7 @@ function SettingsView(){
       <a class="item" href="#catalogue" style="text-decoration:none;color:inherit">${I.box}<div class="grow"><div class="t">Catalogue</div><div class="tiny">Forfaits et services enregistrés</div></div></a>
       <a class="item" href="#profils" style="text-decoration:none;color:inherit">${I.id}<div class="grow"><div class="t">Profils</div><div class="tiny">Micro-entreprise, SASU, SARL…</div></div></a>
       <a class="item" href="#relances" style="text-decoration:none;color:inherit">${I.doc}<div class="grow"><div class="t">Relances</div><div class="tiny">Devis sans réponse, factures en retard</div></div>${(()=>{ const n=relanceList().filter(x=>x.r.due).length; return n?html`<span class="pill late">${n}</span>`:''; })()}</a>
+      <a class="item" href="#urssaf" style="text-decoration:none;color:inherit">${I.doc}<div class="grow"><div class="t">Déclaration URSSAF</div><div class="tiny">Chiffre d’affaires encaissé à déclarer, cotisations estimées</div></div>${urssafDue()?html`<span class="pill due">${urssafDue().label}</span>`:''}</a>
       <a class="item" href="#modeles" style="text-decoration:none;color:inherit">${I.doc}<div class="grow"><div class="t">Modèles d’e-mails</div><div class="tiny">Devis, factures, avoirs, relances</div></div></a>
     </div>
     <${ImportCard} force/>
@@ -2487,9 +2649,9 @@ function App(){
   },[]);
   useEffect(()=>{ const f=()=>{ setRoute(location.hash.slice(1)||'accueil'); window.scrollTo(0,0); }; addEventListener('hashchange',f); return ()=>removeEventListener('hashchange',f); },[]);
   const p=activeProfile();
-  const views={accueil:HomeView, agenda:AgendaView, documents:DocsView, clients:ClientsView, plus:SettingsView, catalogue:CatalogView, profils:ProfilesView, relances:RelancesView, modeles:TemplatesView};
+  const views={accueil:HomeView, agenda:AgendaView, documents:DocsView, clients:ClientsView, plus:SettingsView, catalogue:CatalogView, profils:ProfilesView, relances:RelancesView, modeles:TemplatesView, urssaf:UrssafView};
   const V=views[route]||HomeView;
-  const navOn = k => route===k || (k==='plus' && ['catalogue','profils','relances','modeles'].includes(route));
+  const navOn = k => route===k || (k==='plus' && ['catalogue','profils','relances','modeles','urssaf'].includes(route));
   if(backend.needLogin) return html`<div class="shell"><main class="main"><${Login}/></main><${Toast}/></div>`;
   const body = !S.profiles.length ? html`<${Onboarding}/>` : html`
     <div class="wrap" style="margin-bottom:-4px"><div class="topbar">
@@ -2499,7 +2661,7 @@ function App(){
     </div>${backend.note && html`<div class="notice warn small" style="margin-top:10px">${backend.note}</div>`}</div>
     <${V}/>`;
   return html`<div class="shell">
-    ${S.profiles.length>0 && html`<nav class="side"><div class="brand"><span class="disc"></span>Cabine</div>${NAV.map(([k,l,ic])=>html`<a href=${'#'+k} class=${navOn(k)?'on':''}>${ic}${l}</a>`)}<a href="#catalogue" class=${route==='catalogue'?'on':''}>${I.box}Catalogue</a><a href="#profils" class=${route==='profils'?'on':''}>${I.id}Profils</a><a href="#relances" class=${route==='relances'?'on':''}>${I.doc}Relances</a><a href="#modeles" class=${route==='modeles'?'on':''}>${I.doc}Modèles d’e-mails</a></nav>`}
+    ${S.profiles.length>0 && html`<nav class="side"><div class="brand"><span class="disc"></span>Cabine</div>${NAV.map(([k,l,ic])=>html`<a href=${'#'+k} class=${navOn(k)?'on':''}>${ic}${l}</a>`)}<a href="#catalogue" class=${route==='catalogue'?'on':''}>${I.box}Catalogue</a><a href="#profils" class=${route==='profils'?'on':''}>${I.id}Profils</a><a href="#relances" class=${route==='relances'?'on':''}>${I.doc}Relances</a><a href="#modeles" class=${route==='modeles'?'on':''}>${I.doc}Modèles d’e-mails</a><a href="#urssaf" class=${route==='urssaf'?'on':''}>${I.doc}URSSAF</a></nav>`}
     <main class="main">${body}</main>
     ${S.profiles.length>0 && html`<nav class="tabs">${NAV.map(([k,l,ic])=>html`<a href=${'#'+k} class=${navOn(k)?'on':''}>${ic}${l}</a>`)}</nav>`}
     <${Sheets}/><${Toast}/>
