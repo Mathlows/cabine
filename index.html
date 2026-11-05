@@ -1138,7 +1138,7 @@ function Sheets(){
   const [stack,setStack]=useState([]);
   useEffect(()=>{ pushSheet = s => setStack(x=>[...x,s]); },[]);
   const close = key => setStack(x=>x.filter(s=>s.key!==key));
-  const C = {actions:ActionsSheet, monthBill:MonthBillSheet, importOv:ImportOverlaySheet, colorOne:ColorOne, dups:DuplicatesSheet, colors:ColorsSheet, yearDetail:YearDetail, send:SendSheet, booking:BookingView, bookingSettings:BookingSettings, client:ClientForm, product:ProductForm, profile:ProfileForm, doc:DocEditor, event:EventForm, confirm:Confirm, clientView:ClientView, picker:ProductPicker};
+  const C = {tpl:TemplateEditor, actions:ActionsSheet, monthBill:MonthBillSheet, importOv:ImportOverlaySheet, colorOne:ColorOne, dups:DuplicatesSheet, colors:ColorsSheet, yearDetail:YearDetail, send:SendSheet, booking:BookingView, bookingSettings:BookingSettings, client:ClientForm, product:ProductForm, profile:ProfileForm, doc:DocEditor, event:EventForm, confirm:Confirm, clientView:ClientView, picker:ProductPicker};
   return stack.map(s=>{ const Comp=C[s.kind]; return html`<${Comp} key=${s.key} ...${s.props} onClose=${()=>close(s.key)} />`; });
 }
 
@@ -1468,6 +1468,7 @@ function DocEditor({doc, isNew, onClose}){
   if(isInv && d.number && d.status!=='payee' && d.status!=='annulee' && !fullyCredited(d)) A('Marquer payée', ()=>setStatus({status:'payee', paidAt:todayISO(), paidAssumed:false},'Facture marquée payée'), {pri:!canPA, main:true});
   if(!isInv && !isAv && d.number && d.status==='envoye'){ A('Accepté', ()=>setStatus({status:'accepte'}), {pri:true, main:true}); A('Refusé', ()=>setStatus({status:'refuse'})); }
   if(backend.mode==='supabase' && d.number) A(d.sentAt?'Renvoyer par e-mail':'Envoyer par e-mail', ()=>open('send',{doc:d}), {main:true});
+  if(backend.mode==='supabase' && relanceInfo(d)) A(relanceInfo(d).due?'Relancer le client':'Relancer', ()=>open('send',{doc:d, relance:true}), {main:relanceInfo(d).due, pri:relanceInfo(d).due});
   if(!isInv && !isAv && d.status!=='facture' && d.status!=='refuse') A('Transformer en facture', toInvoice, {main:!!d.number});
   A('Télécharger le PDF', async()=>{ if(!locked && dirty) await save(true); downloadPdf(d); });
   if(isInv && d.number && d.status!=='annulee' && !fullyCredited(d)) A('Créer un avoir', ()=>open('doc',{doc:newAvoir(d), isNew:true}));
@@ -2020,6 +2021,7 @@ function HomeView(){
   return html`<div class="wrap">
     <div><h1>Bonjour${p?.ownerName?' '+p.ownerName.split(' ')[0]:''}</h1><div class="muted">${fdateLong(todayISO())}</div></div>
     <${ImportCard}/>
+    ${backend.mode==='supabase' && html`<${RelanceBanner}/>`}
     ${pastDrafts.length>0 && html`<div class="notice warn">${pastDrafts.length} prestation${pastDrafts.length>1?'s sont passées':' est passée'} sans facture finalisée. <button class="btn ghost sm" onClick=${()=>open('doc',{doc:pastDrafts[0]})}>Voir</button></div>`}
     <div class="stats">
       <button class="card stat" style="text-align:left;font:inherit;color:inherit;cursor:pointer" onClick=${()=>open('yearDetail',{year:y})}><div class="lab">Facturé en ${y}</div><div class="val">${eur(billedYear)}</div><div class="sub">${billedYearDocs.length} facture${billedYearDocs.length>1?'s':''}${avYear.length?` − ${avYear.length} avoir${avYear.length>1?'s':''}`:''}${vatOn(p)?', hors taxes':''} · voir le détail</div></button>
@@ -2057,6 +2059,8 @@ function SettingsView(){
     <div class="list">
       <a class="item" href="#catalogue" style="text-decoration:none;color:inherit">${I.box}<div class="grow"><div class="t">Catalogue</div><div class="tiny">Forfaits et services enregistrés</div></div></a>
       <a class="item" href="#profils" style="text-decoration:none;color:inherit">${I.id}<div class="grow"><div class="t">Profils</div><div class="tiny">Micro-entreprise, SASU, SARL…</div></div></a>
+      <a class="item" href="#relances" style="text-decoration:none;color:inherit">${I.doc}<div class="grow"><div class="t">Relances</div><div class="tiny">Devis sans réponse, factures en retard</div></div>${(()=>{ const n=relanceList().filter(x=>x.r.due).length; return n?html`<span class="pill late">${n}</span>`:''; })()}</a>
+      <a class="item" href="#modeles" style="text-decoration:none;color:inherit">${I.doc}<div class="grow"><div class="t">Modèles d’e-mails</div><div class="tiny">Devis, factures, avoirs, relances</div></div></a>
     </div>
     <${ImportCard} force/>
     ${backend.mode==='supabase' && html`<${GoogleCard}/>`}
@@ -2160,25 +2164,169 @@ function Login(){
 }
 
 /* ---------------- envoi par e-mail ---------------- */
-function mailTemplate(d){
-  const c=docClient(d)||{}; const p=docProfile(d)||{}; const t=computeTotals(d,p);
-  const hello = c.kind==='entreprise' ? (c.contact ? 'Bonjour '+c.contact.split(' ')[0]+',' : 'Bonjour,') : ('Bonjour'+(c.firstName?' '+c.firstName:'')+',');
-  const what = d.type==='avoir' ? `l’avoir ${d.number} d’un montant de ${eur(t.ttc)}, qui vient en déduction de la facture ${d.creditOfNumber}` : d.type==='facture' ? `la facture ${d.number} d’un montant de ${eur(dueOf(d))}` : `le devis ${d.number} d’un montant de ${eur(t.ttc)}`;
-  const presta = d.eventDate ? ` pour la prestation du ${fdate(d.eventDate)}${d.eventLocation?' ('+d.eventLocation+')':''}` : '';
-  const pay = d.type==='facture' && d.dueDate ? `\n\nÉchéance de paiement : ${fdate(d.dueDate)}.${p.iban?' Règlement par virement (coordonnées bancaires sur la facture).':''}` : (d.type==='devis'?'\n\nN’hésitez pas à me contacter pour toute question. Pour valider, il suffit de me retourner le devis signé.':'');
-  return {subject:`${DOC_LABEL[d.type]||'Facture'} ${d.number} – ${p.tradeName||p.ownerName||''}`.trim(),
-    text:`${hello}\n\nVeuillez trouver ci-joint ${what}${presta}.${pay}\n\nMerci pour votre confiance,\n${p.ownerName||''}${p.tradeName?'\n'+p.tradeName:''}${p.phone?'\n'+p.phone:''}`};
+/* ---------------- modèles d'e-mails ---------------- */
+const MAIL_CATS = [['devis','Devis'],['facture','Facture'],['avoir','Avoir'],['relance_devis','Relance devis'],['relance_facture','Relance facture']];
+const SIGN = '\n\n<mon_prenom>\n<entreprise>\n<telephone>';
+const BUILTIN_TEMPLATES = [
+  {id:'b-devis', cat:'devis', name:'Envoi de devis', subject:'Devis <numero> – <entreprise>', body:'Bonjour <prenom>,\n\nVeuillez trouver ci-joint le devis <numero> d’un montant de <montant> pour votre événement du <date_prestation>.\n\nN’hésitez pas à me contacter pour toute question. Pour le valider, il suffit de me retourner le devis signé.\n\nÀ bientôt,'+SIGN, isDefault:true},
+  {id:'b-facture', cat:'facture', name:'Envoi de facture', subject:'Facture <numero> – <entreprise>', body:'Bonjour <prenom>,\n\nVeuillez trouver ci-joint la facture <numero> d’un montant de <montant> pour la prestation du <date_prestation>.\n\nÉchéance de paiement : <echeance>. Règlement par virement (coordonnées bancaires sur la facture).\n\nMerci pour votre confiance,'+SIGN, isDefault:true},
+  {id:'b-avoir', cat:'avoir', name:'Envoi d’avoir', subject:'Avoir <numero> – <entreprise>', body:'Bonjour <prenom>,\n\nVeuillez trouver ci-joint l’avoir <numero> d’un montant de <montant>, qui vient en déduction de la facture <facture_liee>.\n\nBien cordialement,'+SIGN, isDefault:true},
+  {id:'b-relance-devis', cat:'relance_devis', name:'Relance de devis', subject:'Relance – devis <numero>', body:'Bonjour <prenom>,\n\nJe reviens vers vous au sujet du devis <numero> d’un montant de <montant>, envoyé le <date_envoi>. Avez-vous pu en prendre connaissance ?\n\nJe reste disponible pour en discuter ou l’ajuster si besoin. Je vous le joins de nouveau.\n\nBien à vous,'+SIGN, isDefault:true},
+  {id:'b-relance-facture', cat:'relance_facture', name:'Relance de facture', subject:'Relance – facture <numero>', body:'Bonjour <prenom>,\n\nSauf erreur de ma part, la facture <numero> d’un montant de <reste>, arrivée à échéance le <echeance>, n’a pas encore été réglée.\n\nVous la trouverez de nouveau en pièce jointe. Si le paiement est déjà parti, merci de ne pas tenir compte de ce message.\n\nBien cordialement,'+SIGN, isDefault:true},
+];
+const mailTemplates = () => Array.isArray(settings().mailTemplates) ? settings().mailTemplates : BUILTIN_TEMPLATES;
+const templatesFor = cat => mailTemplates().filter(t=>t.cat===cat);
+const defaultTemplate = cat => templatesFor(cat).find(t=>t.isDefault) || templatesFor(cat)[0] || BUILTIN_TEMPLATES.find(t=>t.cat===cat);
+async function saveTemplates(list){ await saveSettings({mailTemplates:list}); }
+/* Champs remplaçables : <prenom>, <montant>… (majuscules et accents indifférents : <Prénom> marche aussi) */
+const MAIL_VARS = [
+  ['prenom','Prénom du client (ou du contact pour une entreprise)'],['nom','Nom de famille du client'],['client','Nom du client ou de l’entreprise'],
+  ['numero','Numéro du document'],['montant','Montant total'],['reste','Reste à payer'],['date_document','Date du document'],
+  ['date_prestation','Date (ou mois) de la prestation'],['lieu','Lieu de la prestation'],['echeance','Date d’échéance'],
+  ['date_envoi','Date du premier envoi'],['jours','Jours écoulés (relance)'],['nb_relances','Nombre de relances déjà faites'],['facture_liee','Facture corrigée par l’avoir'],
+  ['mon_prenom','Votre prénom'],['mon_nom','Votre prénom et nom'],['entreprise','Votre nom commercial'],['telephone','Votre téléphone'],['email','Votre e-mail'],
+];
+function mailValues(d){
+  const c=docClient(d)||{}, live=clientById(d.clientId)||{}, p=docProfile(d)||{}, t=computeTotals(d,p);
+  const cl={...c, contact:live.contact||c.contact, firstName:live.firstName||c.firstName, lastName:live.lastName||c.lastName};
+  const prenom = cl.kind==='entreprise' ? (cl.contact||'').trim().split(/\s+/)[0]||'' : (cl.firstName||'');
+  const nom = cl.kind==='entreprise' ? (cl.contact||'').trim().split(/\s+/).slice(1).join(' ') : (cl.lastName||'');
+  const base = d.sentAt ? d.sentAt.slice(0,10) : d.issueDate;
+  const ref = d.type==='devis' ? (lastRelance(d)?.at?.slice(0,10) || base) : (lastRelance(d)?.at?.slice(0,10) || d.dueDate);
+  return {
+    prenom, nom, client:clientName(cl), numero:d.number||'', montant:eur(t.ttc), reste:eur(d.type==='facture'?dueOf(d):t.ttc),
+    date_document:fdate(d.issueDate), date_prestation: d.monthly ? monthLabel(d.billingMonth) : fdate(d.eventDate||d.issueDate), lieu:d.eventLocation||'',
+    echeance:fdate(d.dueDate), date_envoi:fdate(base), jours: ref ? String(Math.max(0, Math.round((parseISO(todayISO())-parseISO(ref))/86400000))) : '',
+    nb_relances:String((d.relances||[]).length), facture_liee:d.creditOfNumber||'',
+    mon_prenom:(p.ownerName||'').trim().split(/\s+/)[0]||'', mon_nom:p.ownerName||'', entreprise:p.tradeName||p.ownerName||'', telephone:p.phone||'', email:p.email||'',
+  };
 }
-function SendSheet({doc, onClose}){
-  const c=docClient(doc)||{}; const tpl=mailTemplate(doc);
+function renderMail(text, d){
+  const v=mailValues(d);
+  return String(text||'').replace(/<([^<>\n]{2,30})>/g, (m,k)=>{ const key=norm(k).replace(/\s+/g,'_'); return key in v ? v[key] : m; })
+    .replace(/Bonjour ,/g,'Bonjour,').replace(/[ \t]+([,.])/g,'$1').replace(/\n{3,}/g,'\n\n').replace(/[ \t]{2,}/g,' ').replace(/\n+$/,'').trim();
+}
+const mailCatFor = (d, relance) => relance ? (d.type==='devis'?'relance_devis':'relance_facture') : (d.type==='avoir'?'avoir':d.type==='devis'?'devis':'facture');
+
+/* ---------------- relances ---------------- */
+const lastRelance = d => (d.relances||[]).slice(-1)[0];
+const relanceDays = () => Number(settings().relanceDays)||7;
+/* Renvoie {due, since, days, label} si le document doit être relancé, sinon null */
+function relanceInfo(d){
+  const today=todayISO(), every=relanceDays();
+  if(d.type==='devis'){
+    if(!d.number || d.status!=='envoye') return null;
+    const sent = d.sentAt ? d.sentAt.slice(0,10) : d.issueDate; if(!sent) return null;
+    const from = lastRelance(d)?.at?.slice(0,10) || sent;
+    const next = addDays(from, every);
+    return {due: today>=next && !(d.relanceSnooze && d.relanceSnooze>today), next, days:Math.round((parseISO(today)-parseISO(sent))/86400000), label:'Devis sans réponse'};
+  }
+  if(d.type==='facture'){
+    if(!d.number || d.status!=='finalisee' || fullyCredited(d) || !d.dueDate || d.dueDate>=today) return null;
+    const last=lastRelance(d)?.at?.slice(0,10);
+    const next = last ? addDays(last, every) : addDays(d.dueDate,1);
+    return {due: today>=next && !(d.relanceSnooze && d.relanceSnooze>today), next, days:Math.round((parseISO(today)-parseISO(d.dueDate))/86400000), label:'Facture en retard'};
+  }
+  return null;
+}
+function relanceList(){
+  const p=activeProfile();
+  return S.docs.filter(d=>(!p||d.profileId===p.id)).map(d=>({d, r:relanceInfo(d)})).filter(x=>x.r).sort((a,b)=>b.r.days-a.r.days);
+}
+function RelanceRow({d, r}){
+  const t=computeTotals(d,docProfile(d)); const n=(d.relances||[]).length;
+  return html`<div class="item" style="flex-wrap:wrap">
+    <div class="grow" style="min-width:180px"><div class="t">${clientName(docClient(d))} · ${d.number}</div>
+      <div class="tiny">${d.type==='devis'?`envoyé il y a ${r.days} jour${r.days>1?'s':''}`:`en retard de ${r.days} jour${r.days>1?'s':''} (échéance ${fdate(d.dueDate)})`} · ${eur(d.type==='facture'?dueOf(d):t.ttc)}${n?` · ${n} relance${n>1?'s':''}, la dernière le ${fdate(lastRelance(d).at.slice(0,10))}`:''}${!r.due?` · prochaine relance proposée le ${fdate(d.relanceSnooze && d.relanceSnooze>r.next ? d.relanceSnooze : r.next)}`:''}</div></div>
+    <div class="row" style="gap:6px">
+      <button class=${'btn sm'+(r.due?' pri':'')} onClick=${()=>open('send',{doc:d, relance:true})}>Relancer</button>
+      ${r.due && html`<button class="btn sm" onClick=${()=>put('docs',{...d, relanceSnooze:addDays(todayISO(),relanceDays())})}>Plus tard</button>`}
+      ${d.type==='devis' ? html`<button class="btn ghost sm" onClick=${()=>put('docs',{...d,status:'accepte'})}>Accepté</button><button class="btn ghost sm" onClick=${()=>put('docs',{...d,status:'refuse'})}>Refusé</button>`
+        : html`<button class="btn ghost sm" onClick=${()=>put('docs',{...d,status:'payee',paidAt:todayISO(),paidAssumed:false})}>Payée</button>`}
+      <button class="btn ghost sm" onClick=${()=>open('doc',{doc:d})}>Ouvrir</button>
+    </div></div>`;
+}
+function RelancesView(){
+  useStore(); const all=relanceList(); const due=all.filter(x=>x.r.due), later=all.filter(x=>!x.r.due);
+  const sec=(title,list)=>list.length ? html`<div class="sect"><div class="lab">${title}</div><div class="list">${list.map(x=>html`<${RelanceRow} d=${x.d} r=${x.r}/>`)}</div></div>` : '';
+  return html`<div class="wrap">
+    <div class="row sb"><h1>Relances</h1><button class="btn sm" onClick=${()=>location.hash='#modeles'}>Modèles d’e-mails</button></div>
+    <p class="muted" style="margin:0">Devis sans réponse ${relanceDays()} jours après leur envoi, et factures impayées après leur échéance. Après une relance, Cabine la propose de nouveau ${relanceDays()} jours plus tard.</p>
+    ${!due.length && html`<div class="card empty"><h3>Rien à relancer aujourd’hui</h3><p>${later.length?'Les documents en attente sont listés ci-dessous.':'Tous vos devis et factures sont à jour.'}</p></div>`}
+    ${sec('Devis à relancer', due.filter(x=>x.d.type==='devis'))}
+    ${sec('Factures à relancer', due.filter(x=>x.d.type==='facture'))}
+    ${sec('En attente (pas encore le moment)', later)}
+    <label class="f" style="max-width:280px">Délai entre deux relances<select value=${String(relanceDays())} onChange=${e=>saveSettings({relanceDays:Number(e.target.value)})}>${[3,5,7,10,14,21,30].map(n=>html`<option value=${n}>${n} jours</option>`)}</select></label>
+  </div>`;
+}
+function RelanceBanner(){
+  useStore(); const due=relanceList().filter(x=>x.r.due); if(!due.length) return null;
+  const nd=due.filter(x=>x.d.type==='devis').length, nf=due.length-nd;
+  const parts=[nd?`${nd} devis sans réponse`:'', nf?`${nf} facture${nf>1?'s':''} en retard`:''].filter(Boolean).join(' et ');
+  const one=due.length===1 ? due[0].d : null;
+  return html`<div class="notice row sb" style="border-left:4px solid var(--warn)"><span><b>À relancer :</b> ${parts}${one?` (${clientName(docClient(one))}, ${one.number})`:''}.</span>
+    <span class="row" style="gap:6px">${one && html`<button class="btn sm pri" onClick=${()=>open('send',{doc:one, relance:true})}>Préparer la relance</button>`}<button class=${'btn sm'+(one?'':' pri')} onClick=${()=>location.hash='#relances'}>${one?'Voir':'Voir les relances'}</button></span></div>`;
+}
+
+/* ---------------- espace « Modèles d'e-mails » ---------------- */
+function TemplatesView(){
+  useStore(); const [cat,setCat]=useState(lsGet('cabine-tplcat')||'devis');
+  const list=templatesFor(cat);
+  return html`<div class="wrap">
+    <div class="row sb"><h1>Modèles d’e-mails</h1><button class="btn pri" onClick=${()=>open('tpl',{tpl:{id:uid(), cat, name:'', subject:defaultTemplate(cat).subject, body:defaultTemplate(cat).body, isDefault:!list.length}, isNew:true})}>Nouveau modèle</button></div>
+    <p class="muted" style="margin:0">Au moment d’envoyer, seuls les modèles de la catégorie du document sont proposés. Le modèle « par défaut » est prérempli.</p>
+    <div class="seg" style="flex-wrap:wrap">${MAIL_CATS.map(([k,l])=>html`<button class=${cat===k?'on':''} onClick=${()=>{ setCat(k); lsSet('cabine-tplcat',k); }}>${l}</button>`)}</div>
+    ${list.length ? html`<div class="list">${list.map(t=>html`<button class="item" onClick=${()=>open('tpl',{tpl:t})}><div class="grow"><div class="t">${t.name||'Sans nom'}${t.isDefault?html` <span class="pill due">Par défaut</span>`:''}</div><div class="tiny" style="white-space:nowrap;overflow:hidden;text-overflow:ellipsis">${t.subject}</div></div><span class="tiny">Modifier</span></button>`)}</div>`
+      : html`<div class="card empty"><h3>Aucun modèle dans cette catégorie</h3><p>Le texte standard de Cabine sera utilisé. Créez un modèle pour le personnaliser.</p></div>`}
+  </div>`;
+}
+function TemplateEditor({tpl, isNew, onClose}){
+  const [t,setT]=useState(()=>clone(tpl)); const bodyRef=useRef(null); const subjRef=useRef(null); const [focus,setFocus]=useState('body');
+  const sample = S.docs.filter(d=>d.number && (t.cat==='devis'||t.cat==='relance_devis' ? d.type==='devis' : t.cat==='avoir' ? d.type==='avoir' : d.type==='facture')).sort((a,b)=>(b.issueDate||'').localeCompare(a.issueDate||''))[0];
+  const insert = k => { const ref=focus==='subject'?subjRef:bodyRef; const key=focus==='subject'?'subject':'body'; const el=ref.current; const tag='<'+k+'>';
+    if(!el){ setT(x=>({...x,[key]:(x[key]||'')+tag})); return; }
+    const a=el.selectionStart??el.value.length, b=el.selectionEnd??a; const v=el.value.slice(0,a)+tag+el.value.slice(b);
+    setT(x=>({...x,[key]:v})); setTimeout(()=>{ el.focus(); el.setSelectionRange(a+tag.length,a+tag.length); },0); };
+  async function save(){
+    if(!t.name.trim()){ toast('Donnez un nom au modèle.'); return; }
+    let list=clone(mailTemplates()).filter(x=>x.id!==t.id);
+    if(t.isDefault) list=list.map(x=>x.cat===t.cat?{...x,isDefault:false}:x);
+    else if(!list.some(x=>x.cat===t.cat && x.isDefault)) t.isDefault=true;  // toujours un modèle par défaut par catégorie
+    list.push(t); await saveTemplates(list); toast('Modèle enregistré'); onClose();
+  }
+  async function remove(){ let list=clone(mailTemplates()).filter(x=>x.id!==t.id); if(t.isDefault){ const o=list.find(x=>x.cat===t.cat); if(o) o.isDefault=true; } await saveTemplates(list); toast('Modèle supprimé'); onClose(); }
+  return html`<${Sheet} title=${isNew?'Nouveau modèle':'Modifier le modèle'} onClose=${onClose} actions=${html`<button class="btn pri sm" onClick=${save}>Enregistrer</button>`}>
+    <div class="fields">
+      <${F} label="Nom du modèle (pour le reconnaître)" value=${t.name} onInput=${v=>setT(x=>({...x,name:v}))} placeholder="ex. Relance amicale"/>
+      <${Sel} label="Catégorie" value=${t.cat} onChange=${v=>setT(x=>({...x,cat:v}))} options=${MAIL_CATS}/>
+      <label class="f full">Objet<input ref=${subjRef} value=${t.subject} onFocus=${()=>setFocus('subject')} onInput=${e=>setT(x=>({...x,subject:e.target.value}))}/></label>
+      <label class="f full">Message<textarea ref=${bodyRef} style="min-height:220px" value=${t.body} onFocus=${()=>setFocus('body')} onInput=${e=>setT(x=>({...x,body:e.target.value}))}></textarea></label>
+    </div>
+    <div class="sect"><div class="lab">Insérer un champ (touchez pour l’ajouter à l’endroit du curseur)</div>
+      <div class="row" style="gap:6px">${MAIL_VARS.map(([k,l])=>html`<button class="btn sm" title=${l} onClick=${()=>insert(k)}>${'<'+k+'>'}</button>`)}</div>
+      <div class="tiny">Chaque champ est remplacé par la bonne valeur au moment de l’envoi. Majuscules et accents indifférents : ${'<Prénom>'} marche aussi.</div></div>
+    <label class="check"><input type="checkbox" checked=${!!t.isDefault} onChange=${e=>setT(x=>({...x,isDefault:e.target.checked}))}/><span>Modèle par défaut pour « ${MAIL_CATS.find(c=>c[0]===t.cat)?.[1]} »</span></label>
+    ${sample && html`<div class="sect"><div class="lab">Aperçu avec ${sample.number} (${clientName(docClient(sample))})</div><div class="card stack" style="font-size:.92rem;gap:8px"><div><span class="tiny">Objet</span><br/><b>${renderMail(t.subject,sample)}</b></div><div style="white-space:pre-wrap;border-top:1px solid var(--line);padding-top:8px">${renderMail(t.body,sample)}</div></div></div>`}
+    ${!isNew && html`<button class="btn danger" style="align-self:flex-start" onClick=${remove}>Supprimer ce modèle</button>`}
+  <//>`;
+}
+
+/* ---------------- envoi par e-mail ---------------- */
+function SendSheet({doc, relance, onClose}){
+  useStore();
+  const c=docClient(doc)||{}; const cat=mailCatFor(doc, relance); const choices=templatesFor(cat);
+  const first=defaultTemplate(cat);
   // adresse proposée : la dernière utilisée pour ce client, sinon celle de sa fiche (version à jour), sinon celle de la facture
   const live=clientById(doc.clientId)||{};
   const lastSent=S.docs.filter(x=>x.clientId===doc.clientId && x.sentTo).sort((a,b)=>(b.sentAt||'').localeCompare(a.sentAt||''))[0]?.sentTo;
   const suggested = live.lastMailTo || lastSent || live.email || c.email || '';
-  const [f,setF,b]=useForm({to:suggested, subject:tpl.subject, text:tpl.text});
+  const [tplId,setTplId]=useState(first.id);
+  const [f,setF,b]=useForm({to:suggested, subject:renderMail(first.subject,doc), text:renderMail(first.body,doc)});
+  const pick = id => { const t=choices.find(x=>x.id===id)||first; setTplId(id); setF(x=>({...x, subject:renderMail(t.subject,doc), text:renderMail(t.body,doc)})); };
   const [busy,setBusy]=useState(false);
   async function send(){
     if(!f.to){ toast('Indiquez l’adresse du destinataire.'); return; }
+    if(/<[a-zà-ü_ ]{2,30}>/i.test(f.subject+f.text)){ toast('Un champ <…> n’a pas été reconnu : vérifiez l’orthographe dans le message.'); return; }
     setBusy(true);
     try{
       const file = await documentFile(doc); let bin=''; for(let i=0;i<file.bytes.length;i+=0x8000) bin+=String.fromCharCode.apply(null, file.bytes.subarray(i,i+0x8000));
@@ -2186,15 +2334,18 @@ function SendSheet({doc, onClose}){
       const p=docProfile(doc)||{};
       await gcall('send',{to:f.to, subject:f.subject, text:f.text, fromName:p.tradeName||p.ownerName||'', attachments:[{filename:pdfName(doc), base64}]});
       const cur=S.docs.find(x=>x.id===doc.id)||doc;
-      await put('docs',{...cur, sentAt:new Date().toISOString(), sentTo:f.to});
+      if(relance) await put('docs',{...cur, relances:[...(cur.relances||[]), {at:new Date().toISOString(), to:f.to}], relanceSnooze:''});
+      else await put('docs',{...cur, sentAt:new Date().toISOString(), sentTo:f.to});
       // retenir l'adresse utilisée pour les prochains envois (et la mettre sur la fiche si elle n'en avait pas)
       const lc=clientById(doc.clientId);
       if(lc){ const to=f.to.trim(); const first=to.split(',')[0].trim(); if(lc.lastMailTo!==to || !lc.email) await put('clients',{...lc, lastMailTo:to, email: lc.email || first}); }
-      toast('E-mail envoyé à '+f.to); onClose();
+      toast((relance?'Relance envoyée à ':'E-mail envoyé à ')+f.to); onClose();
     }catch(e){ toast(e.message==='google_not_connected' ? 'Reconnectez votre compte Google (Plus > Se déconnecter, puis se reconnecter).' : 'Envoi impossible : '+e.message); setBusy(false); }
   }
-  return html`<${Sheet} title="Envoyer par e-mail" onClose=${onClose} actions=${html`<button class="btn pri sm" onClick=${send} disabled=${busy}>${busy?'Envoi…':'Envoyer'}</button>`}>
+  return html`<${Sheet} title=${relance?'Relancer par e-mail':'Envoyer par e-mail'} onClose=${onClose} actions=${html`<button class="btn pri sm" onClick=${send} disabled=${busy}>${busy?'Envoi…':'Envoyer'}</button>`}>
+    ${relance && (doc.relances||[]).length>0 && html`<div class="tiny">Déjà relancé ${doc.relances.length} fois, la dernière le ${fdate(lastRelance(doc).at.slice(0,10))}.</div>`}
     <div class="fields">
+      <label class="f full">Modèle (${MAIL_CATS.find(x=>x[0]===cat)?.[1]})<span class="row" style="flex-wrap:nowrap;gap:6px"><select class="inp" value=${tplId} onChange=${e=>pick(e.target.value)}>${(choices.length?choices:[first]).map(t=>html`<option value=${t.id}>${t.name||'Sans nom'}${t.isDefault?' (par défaut)':''}</option>`)}</select><button class="btn sm" onClick=${()=>{ onClose(); location.hash='#modeles'; }}>Gérer</button></span></label>
       <${F} label="Destinataire (plusieurs adresses : séparez par une virgule)" full type="email" ...${b('to')}/>
       <${F} label="Objet" full ...${b('subject')}/>
       <${TA} label="Message" ...${b('text')} style="min-height:220px"/>
@@ -2336,9 +2487,9 @@ function App(){
   },[]);
   useEffect(()=>{ const f=()=>{ setRoute(location.hash.slice(1)||'accueil'); window.scrollTo(0,0); }; addEventListener('hashchange',f); return ()=>removeEventListener('hashchange',f); },[]);
   const p=activeProfile();
-  const views={accueil:HomeView, agenda:AgendaView, documents:DocsView, clients:ClientsView, plus:SettingsView, catalogue:CatalogView, profils:ProfilesView};
+  const views={accueil:HomeView, agenda:AgendaView, documents:DocsView, clients:ClientsView, plus:SettingsView, catalogue:CatalogView, profils:ProfilesView, relances:RelancesView, modeles:TemplatesView};
   const V=views[route]||HomeView;
-  const navOn = k => route===k || (k==='plus' && ['catalogue','profils'].includes(route));
+  const navOn = k => route===k || (k==='plus' && ['catalogue','profils','relances','modeles'].includes(route));
   if(backend.needLogin) return html`<div class="shell"><main class="main"><${Login}/></main><${Toast}/></div>`;
   const body = !S.profiles.length ? html`<${Onboarding}/>` : html`
     <div class="wrap" style="margin-bottom:-4px"><div class="topbar">
@@ -2348,7 +2499,7 @@ function App(){
     </div>${backend.note && html`<div class="notice warn small" style="margin-top:10px">${backend.note}</div>`}</div>
     <${V}/>`;
   return html`<div class="shell">
-    ${S.profiles.length>0 && html`<nav class="side"><div class="brand"><span class="disc"></span>Cabine</div>${NAV.map(([k,l,ic])=>html`<a href=${'#'+k} class=${navOn(k)?'on':''}>${ic}${l}</a>`)}<a href="#catalogue" class=${route==='catalogue'?'on':''}>${I.box}Catalogue</a><a href="#profils" class=${route==='profils'?'on':''}>${I.id}Profils</a></nav>`}
+    ${S.profiles.length>0 && html`<nav class="side"><div class="brand"><span class="disc"></span>Cabine</div>${NAV.map(([k,l,ic])=>html`<a href=${'#'+k} class=${navOn(k)?'on':''}>${ic}${l}</a>`)}<a href="#catalogue" class=${route==='catalogue'?'on':''}>${I.box}Catalogue</a><a href="#profils" class=${route==='profils'?'on':''}>${I.id}Profils</a><a href="#relances" class=${route==='relances'?'on':''}>${I.doc}Relances</a><a href="#modeles" class=${route==='modeles'?'on':''}>${I.doc}Modèles d’e-mails</a></nav>`}
     <main class="main">${body}</main>
     ${S.profiles.length>0 && html`<nav class="tabs">${NAV.map(([k,l,ic])=>html`<a href=${'#'+k} class=${navOn(k)?'on':''}>${ic}${l}</a>`)}</nav>`}
     <${Sheets}/><${Toast}/>
