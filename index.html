@@ -2223,12 +2223,12 @@ function SettingsView(){
       <a class="item" href="#relances" style="text-decoration:none;color:inherit">${I.doc}<div class="grow"><div class="t">Relances</div><div class="tiny">Devis sans réponse, factures en retard</div></div>${(()=>{ const n=relanceList().filter(x=>x.r.due).length; return n?html`<span class="pill late">${n}</span>`:''; })()}</a>
       <a class="item" href="#urssaf" style="text-decoration:none;color:inherit">${I.doc}<div class="grow"><div class="t">Déclaration URSSAF</div><div class="tiny">Chiffre d’affaires encaissé à déclarer, cotisations estimées</div></div>${urssafDue()?html`<span class="pill due">${urssafDue().label}</span>`:''}</a>
       <a class="item" href="#modeles" style="text-decoration:none;color:inherit">${I.doc}<div class="grow"><div class="t">Modèles d’e-mails</div><div class="tiny">Devis, factures, avoirs, relances</div></div></a>
+      ${backend.mode==='supabase' && html`<button class="item" onClick=${()=>open('bookingSettings')}>${I.cal}<div class="grow"><div class="t">Page de réservation</div><div class="tiny">Disponibilités et lien à partager</div></div></button>`}
     </div>
     <${ImportCard} force/>
     ${backend.mode==='supabase' && html`<${GoogleCard}/>`}
     ${backend.mode==='supabase' && html`<${RemindersCard}/>`}
     ${backend.mode==='supabase' && html`<${PACard}/>`}
-    ${backend.mode==='supabase' && html`<div class="list"><button class="item" onClick=${()=>open('bookingSettings')}>${I.cal}<div class="grow"><div class="t">Page de réservation</div><div class="tiny">Disponibilités et lien à partager</div></div></button></div>`}
     <div class="card stack"><h2>Vos données</h2>
       <div class="small muted">${backend.mode==='supabase'?'Vos données sont enregistrées dans votre base Supabase privée. Vous seul y avez accès, sur tous vos appareils.':backend.mode==='cloud'?'Vos données sont enregistrées dans votre espace privé sur claude.ai. Vous seul y avez accès, sur tous vos appareils connectés.':'Vos données sont enregistrées sur cet appareil uniquement.'}</div>
       <div class="row"><button class="btn" onClick=${exportAll}>Télécharger une sauvegarde</button><label class="btn">Importer une sauvegarde<input type="file" accept=".json,application/json" hidden onChange=${importAll}/></label></div>
