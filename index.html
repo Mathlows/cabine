@@ -117,6 +117,8 @@ label.f textarea{min-height:76px;resize:vertical}
 .cal .cell{min-height:66px;border:1px solid var(--line);background:var(--surface);border-radius:8px;padding:3px;display:flex;flex-direction:column;gap:2px;min-width:0;cursor:pointer;overflow:hidden}
 .cal .cell:hover{border-color:var(--ink-3)}
 .cal .cell.out{opacity:.4}
+.cal .cell.open{background-image:repeating-linear-gradient(135deg,var(--accent-soft) 0 5px,transparent 5px 10px)}
+.leg i.hatch{background:repeating-linear-gradient(135deg,var(--accent) 0 2px,var(--accent-soft) 2px 4px)!important}
 .cal .cell.sel{border-color:var(--accent);box-shadow:inset 0 0 0 1px var(--accent)}
 .cal .num{font-size:.8rem;font-weight:600;align-self:flex-start;min-width:20px;height:20px;padding:0 4px;display:grid;place-items:center;border-radius:10px}
 .cal .cell.today .num{background:var(--accent);color:var(--accent-ink)}
@@ -1157,7 +1159,7 @@ function Sheets(){
   const [stack,setStack]=useState([]);
   useEffect(()=>{ pushSheet = s => setStack(x=>[...x,s]); },[]);
   const close = key => setStack(x=>x.filter(s=>s.key!==key));
-  const C = {tpl:TemplateEditor, actions:ActionsSheet, monthBill:MonthBillSheet, importOv:ImportOverlaySheet, colorOne:ColorOne, dups:DuplicatesSheet, colors:ColorsSheet, yearDetail:YearDetail, send:SendSheet, booking:BookingView, bookingSettings:BookingSettings, client:ClientForm, product:ProductForm, profile:ProfileForm, doc:DocEditor, event:EventForm, confirm:Confirm, clientView:ClientView, picker:ProductPicker};
+  const C = {opening:OpeningSheet, tpl:TemplateEditor, actions:ActionsSheet, monthBill:MonthBillSheet, importOv:ImportOverlaySheet, colorOne:ColorOne, dups:DuplicatesSheet, colors:ColorsSheet, yearDetail:YearDetail, send:SendSheet, booking:BookingView, bookingSettings:BookingSettings, client:ClientForm, product:ProductForm, profile:ProfileForm, doc:DocEditor, event:EventForm, confirm:Confirm, clientView:ClientView, picker:ProductPicker};
   return stack.map(s=>{ const Comp=C[s.kind]; return html`<${Comp} key=${s.key} ...${s.props} onClose=${()=>close(s.key)} />`; });
 }
 
@@ -1950,6 +1952,8 @@ function AgendaView(){
   const first=new Date(cur.y,cur.m,1); const startOff=(first.getDay()+6)%7;
   const days=[]; for(let i=0;i<42;i++){ const d=new Date(cur.y,cur.m,1-startOff+i); days.push(d); }
   const byDate={}; S.events.forEach(e=>{ (byDate[e.date]=byDate[e.date]||[]).push(e); });
+  const bookOn = backend.mode==='supabase';
+  const opBy={}; if(bookOn) openings().forEach(o=>{ (opBy[o.date]=opBy[o.date]||[]).push(o); });
   const [slide,setSlide]=useState('');
   const shift=n=>{ setSlide(n>0?'next':'prev'); setCur(c=>{ const d=new Date(c.y,c.m+n,1); return {y:d.getFullYear(), m:d.getMonth()}; }); };
   const calRef=useSwipe({onLeft:()=>shift(1), onRight:()=>shift(-1)});
@@ -1983,7 +1987,7 @@ function AgendaView(){
       <div class=${'cal'+(slide?' slide-'+slide:'')} key=${cur.y+'-'+cur.m}>${['lun','mar','mer','jeu','ven','sam','dim'].map(d=>html`<div class="dow">${d}</div>`)}
         ${days.slice(0,rows).map(d=>{ const k=iso(d); const evs=(byDate[k]||[]).slice().sort((a,b)=>(a.start||'').localeCompare(b.start||'')); const ovs=ovBy[k]||[];
           const max=wide?4:3; const all=[...evs.map(e=>({t:'c',e})), ...ovs.map(e=>({t:'g',e}))]; const shown=all.slice(0, all.length>max?max-1:max);
-          return html`<div role="button" tabindex="0" class=${['cell', d.getMonth()!==cur.m&&'out', k===todayISO()&&'today', k===sel&&'sel'].filter(Boolean).join(' ')} onClick=${()=>setSel(k)} onKeyDown=${ev=>{ if(ev.key==='Enter') setSel(k); }} aria-label=${fdateLong(k)}>
+          return html`<div role="button" tabindex="0" class=${['cell', d.getMonth()!==cur.m&&'out', k===todayISO()&&'today', k===sel&&'sel', opBy[k]&&'open'].filter(Boolean).join(' ')} onClick=${()=>setSel(k)} onKeyDown=${ev=>{ if(ev.key==='Enter') setSel(k); }} aria-label=${fdateLong(k)}>
             <span class="num">${d.getDate()}</span>
             ${shown.map(x=>x.t==='c'
               ? html`<button class="ev" style=${`--c:${eventColor(x.e)}`} title=${eventSummary(x.e)} onClick=${ev=>{ ev.stopPropagation(); open('event',{event:x.e}); }}>${evLabel(x.e)}</button>`
@@ -1994,11 +1998,15 @@ function AgendaView(){
       <div class="legend tiny">
         <button class="leg" onClick=${()=>open('colorOne',{kind:'presta'})} title="Changer la couleur"><i style=${`background:${calColors().presta}`}></i>Prestation</button>
         <button class="leg" onClick=${()=>open('colorOne',{kind:'rdv'})} title="Changer la couleur"><i style=${`background:${calColors().rdv}`}></i>Rendez-vous</button>
+        ${bookOn && Object.keys(opBy).length>0 && html`<span class="leg"><i class="hatch"></i>Ouvert aux RDV</span>`}
         ${legendCals.map(c=>html`<button class="leg" onClick=${()=>open('colorOne',{kind:'cal', calId:c.id, name:c.name})} title="Changer la couleur"><i style=${`background:${(settings().colors?.cals||{})[c.id]||c.color||'#8a90a3'}`}></i>${c.name}</button>`)}
         <span class="muted" style="font-size:.7rem">Touchez une pastille pour changer sa couleur</span></div>
     </div>
     ${(()=>{ const cand=Object.values(ovBy).flat().filter((o,i,a)=>a.findIndex(x=>x.id===o.id)===i && o.date>=addDays(todayISO(),-60) && matchClient(o.summary+' '+(o.location||''))); return cand.length ? html`<div class="notice small row sb"><span><b>${cand.length} événement${cand.length>1?'s':''}</b> de vos autres agendas ${cand.length>1?'ressemblent':'ressemble'} à des prestations pour vos clients (${[...new Set(cand.map(o=>o.summary))].slice(0,3).join(', ')}${cand.length>3?'…':''}).</span><button class="btn sm pri" onClick=${()=>open('importOv',{items:cand.sort((a,b)=>a.date.localeCompare(b.date))})}>Les importer</button></div>` : ''; })()}
     <div class="sect"><div class="lab" style="text-transform:none;letter-spacing:0;font-size:.95rem;color:var(--ink)">${fdateLong(sel)}</div>
+      ${bookOn && sel>=todayISO() && (opBy[sel]
+        ? html`<div class="notice small row sb" style="flex-wrap:wrap;gap:6px"><span><b>Ouvert aux rendez-vous</b> · ${rangesLabel(opBy[sel].slice().sort((a,b)=>a.from.localeCompare(b.from)))}</span><span class="row" style="gap:4px"><button class="btn ghost sm" onClick=${()=>dupWeek(mondayOf(sel))}>Copier la semaine sur la suivante</button><button class="btn sm" onClick=${()=>open('opening',{date:sel})}>Modifier</button></span></div>`
+        : html`<button class="btn ghost sm" style="align-self:flex-start" onClick=${()=>open('opening',{date:sel})}>Ouvrir aux rendez-vous</button>`)}
       ${selEvents.length ? html`<${EventList} events=${selEvents}/>` : (ovBy[sel]?.length ? '' : html`<div class="muted small">Rien de prévu ce jour-là.</div>`)}
       ${ovBy[sel]?.length ? html`<div class="tiny" style="margin-top:2px">Dans vos autres agendas Google</div><${OverlayList} items=${ovBy[sel]}/>` : ''}</div>
     <div class="sect"><div class="lab">Prochaines dates</div>${upcoming.length? html`<${EventList} events=${upcoming}/>` : html`<div class="muted small">Aucune date à venir.</div>`}</div>
@@ -2242,7 +2250,7 @@ function SettingsView(){
       <a class="item" href="#relances" style="text-decoration:none;color:inherit">${I.doc}<div class="grow"><div class="t">Relances</div><div class="tiny">Devis sans réponse, factures en retard</div></div>${(()=>{ const n=relanceList().filter(x=>x.r.due).length; return n?html`<span class="pill late">${n}</span>`:''; })()}</a>
       <a class="item" href="#urssaf" style="text-decoration:none;color:inherit">${I.doc}<div class="grow"><div class="t">Déclaration URSSAF</div><div class="tiny">Chiffre d’affaires encaissé à déclarer, cotisations estimées</div></div>${urssafDue()?html`<span class="pill due">${urssafDue().label}</span>`:''}</a>
       <a class="item" href="#modeles" style="text-decoration:none;color:inherit">${I.doc}<div class="grow"><div class="t">Modèles d’e-mails</div><div class="tiny">Devis, factures, avoirs, relances</div></div></a>
-      ${backend.mode==='supabase' && html`<button class="item" onClick=${()=>open('bookingSettings')}>${I.cal}<div class="grow"><div class="t">Page de réservation</div><div class="tiny">Disponibilités et lien à partager</div></div></button>`}
+      ${backend.mode==='supabase' && html`<button class="item" onClick=${()=>open('bookingSettings')}>${I.cal}<div class="grow"><div class="t">Page de réservation</div><div class="tiny">Plages ouvertes, lien à partager</div></div></button>`}
     </div>
     <${ImportCard} force/>
     ${backend.mode==='supabase' && html`<${GoogleCard}/>`}
@@ -2543,11 +2551,11 @@ function BookingList(){
   useStore();
   const open_ = S.bookings.filter(b=>b.status==='pending' || b.status==='proposed');
   if(backend.mode!=='supabase') return null;
-  return html`<div class="sect"><div class="row sb"><div class="lab">Demandes de rendez-vous</div><button class="btn ghost sm" onClick=${()=>open('bookingSettings')}>Disponibilités</button></div>
+  return html`<div class="sect"><div class="row sb"><div class="lab">Demandes de rendez-vous</div><button class="btn ghost sm" onClick=${()=>open('bookingSettings')}>Réglages</button></div>
     ${open_.length ? html`<div class="list">${open_.map(b=>html`<button class="item" onClick=${()=>open('booking',{id:b.id})}>
-      <div class="grow"><div class="t">${bookingName(b.form||{})}</div><div class="tiny">${b.slot_start?fdt(b.slot_start):''}${b.form?.eventType?' · '+b.form.eventType:''}</div></div>
-      <span class=${'pill '+(b.status==='pending'?'draft':'due')}>${b.status==='pending'?(b.form?.picked?'Créneau choisi':'À valider'):'Créneaux proposés'}</span></button>`)}</div>`
-      : html`<div class="muted small">Aucune demande en attente. Partagez votre lien de réservation depuis « Disponibilités ».</div>`}
+      <div class="grow"><div class="t">${bookingName(b.form||{})}</div><div class="tiny">${b.slot_start?fdt(b.slot_start):'Sans créneau'}${b.form?.eventType?' · '+b.form.eventType:''}</div></div>
+      <span class=${'pill '+(b.status==='pending'?'draft':'due')}>${b.status==='pending'?(b.form?.picked?'Créneau choisi':b.slot_start?'À valider':'À proposer'):'Créneaux proposés'}</span></button>`)}</div>`
+      : html`<div class="muted small">Aucune demande en attente. Partagez votre lien de réservation depuis « Réglages ».</div>`}
   </div>`;
 }
 function BookingView({id, onClose}){
@@ -2578,10 +2586,11 @@ function BookingView({id, onClose}){
   }
   async function decline(){ setBusy(true); await sb.from('booking_requests').update({status:'declined'}).eq('id',b.id); await mail(f.email,'Votre demande de rendez-vous',`Bonjour ${f.firstName||bookingName(f)},\n\nJe ne suis malheureusement pas disponible pour ce rendez-vous. N’hésitez pas à refaire une demande sur un autre créneau :\n${bookingLink()}\n\nBien à vous,\n${activeProfile()?.ownerName||''}`); toast('Demande refusée'); onClose(); }
   return html`<${Sheet} title=${bookingName(f)} onClose=${onClose}>
-    ${b.slot_start && html`<div class="card"><div class="tiny">Créneau ${f.picked?'choisi par le client':'demandé'}</div><div style="font-weight:600;font-size:1.05rem">${fdt(b.slot_start)}</div></div>`}
+    ${b.slot_start ? html`<div class="card"><div class="tiny">Créneau ${f.picked?'choisi par le client':'demandé'}</div><div style="font-weight:600;font-size:1.05rem">${fdt(b.slot_start)}</div></div>`
+      : b.status==='pending' && html`<div class="notice small">Aucun créneau n’était ouvert : proposez-lui des créneaux ci-dessous.</div>`}
     <div class="list">${answers.map(([k,v])=>html`<div class="item"><div class="tiny" style="width:90px;flex:none">${k}</div><div class="grow" style="white-space:pre-wrap">${v}</div></div>`)}</div>
-    ${b.status==='pending' && html`<div class="row"><button class="btn pri" disabled=${busy} onClick=${accept}>Valider ce créneau</button><button class="btn danger" disabled=${busy} onClick=${decline}>Refuser</button></div>`}
-    <div class="sect"><div class="lab">${b.status==='proposed'?'Créneaux déjà proposés':'Proposer d’autres créneaux'}</div>
+    ${b.status==='pending' && html`<div class="row">${b.slot_start && html`<button class="btn pri" disabled=${busy} onClick=${accept}>Valider ce créneau</button>`}<button class="btn danger" disabled=${busy} onClick=${decline}>Refuser</button></div>`}
+    <div class="sect"><div class="lab">${b.status==='proposed'?'Créneaux déjà proposés':b.slot_start?'Proposer d’autres créneaux':'Proposer des créneaux'}</div>
       ${b.status==='proposed' ? html`<div class="small">${(b.proposals||[]).map(x=>html`<div>• ${fdt(x.start)}</div>`)}</div><div class="tiny">En attente du choix du client.</div>` : html`
       ${props.map((x,i)=>html`<div class="row" style="flex-wrap:nowrap"><input class="inp" type="date" value=${x.date} onInput=${e=>setProps(p=>p.map((y,j)=>j===i?{...y,date:e.target.value}:y))}/><input class="inp" type="time" value=${x.time} onInput=${e=>setProps(p=>p.map((y,j)=>j===i?{...y,time:e.target.value}:y))}/></div>`)}
       <div class="row">${props.length<3 && html`<button class="btn ghost sm" onClick=${()=>setProps(p=>[...p,{date:'',time:''}])}>Ajouter un créneau</button>`}<button class="btn" disabled=${busy} onClick=${propose}>Envoyer la proposition</button></div>
@@ -2589,17 +2598,85 @@ function BookingView({id, onClose}){
     </div>
   <//>`;
 }
+/* ---------------- plages ouvertes aux rendez-vous (au cas par cas, depuis l'agenda) ---------------- */
+const openings = () => (settings().booking?.openings||[]).filter(o=>o.date>=todayISO());
+const openingsOn = d => openings().filter(o=>o.date===d).sort((a,b)=>a.from.localeCompare(b.from));
+const mondayOf = d => addDays(d, -((parseISO(d).getDay()+6)%7));
+const rangesLabel = list => list.map(o=>o.from.replace(':','h')+'–'+o.to.replace(':','h')).join(', ');
+async function saveOpenings(list){
+  const clean=list.filter(o=>o.date>=todayISO() && o.from && o.to && o.from!==o.to).sort((a,b)=>(a.date+a.from).localeCompare(b.date+b.from));
+  const booking={...(settings().booking||{}), openings:clean};
+  await saveSettings({booking});
+  if(backend.mode==='supabase'){
+    const {error}=await sb.from('booking_settings').upsert({user_id:backend.user.id, data:{...booking, calendarId:settings().calendarId||''}, updated_at:new Date().toISOString()});
+    if(error){ toast('Plages non publiées : '+error.message); return false; }
+  }
+  return true;
+}
+/* Copie les plages d'une semaine (lundi → dimanche) sur la semaine suivante */
+async function dupWeek(monday){
+  const src=openings().filter(o=>o.date>=monday && o.date<addDays(monday,7)); if(!src.length) return;
+  const targets=new Set(src.map(o=>addDays(o.date,7)));
+  if(await saveOpenings([...openings().filter(o=>!targets.has(o.date)), ...src.map(o=>({...o, date:addDays(o.date,7)}))])) toast('Plages copiées sur la semaine du '+fdate(addDays(monday,7)));
+}
+function OpeningSheet({date, onClose}){
+  useStore();
+  const existing=openingsOn(date);
+  const last=openings().slice(-1)[0];
+  const [ranges,setRanges]=useState(()=>existing.length ? existing.map(o=>({from:o.from,to:o.to})) : [{from:last?.from||'14:00', to:last?.to||'18:00'}]);
+  const mon=mondayOf(date); const week=[0,1,2,3,4,5,6].map(i=>addDays(mon,i));
+  const [days,setDays]=useState([date]); const [weeks,setWeeks]=useState(0);
+  const bk=settings().booking||{}; const dur=Number(bk.duration)||45;
+  const targets=()=>{ const t=[]; for(let w=0;w<=weeks;w++) for(const d of days){ const x=addDays(d,7*w); if(x>=todayISO()) t.push(x); } return [...new Set(t)]; };
+  async function save(){
+    const bad=ranges.find(r=>!r.from||!r.to||r.from===r.to); if(bad){ toast('Vérifiez les horaires.'); return; }
+    const t=targets(); if(!t.length){ toast('Choisissez au moins un jour à venir.'); return; }
+    const ts=new Set(t);
+    if(await saveOpenings([...openings().filter(o=>!ts.has(o.date)), ...t.flatMap(d=>ranges.map(r=>({date:d, from:r.from, to:r.to})))])){
+      toast(t.length>1 ? t.length+' jours ouverts aux rendez-vous' : 'Jour ouvert aux rendez-vous'); onClose(); }
+  }
+  async function closeDay(){ if(await saveOpenings(openings().filter(o=>o.date!==date))){ toast('Ce jour n’est plus ouvert aux rendez-vous'); onClose(); } }
+  const n=targets().length;
+  const slotsPer=ranges.reduce((a,r)=>{ if(!r.from||!r.to) return a; const [h1,m1]=r.from.split(':').map(Number), [h2,m2]=r.to.split(':').map(Number); let m=(h2*60+m2)-(h1*60+m1); if(m<=0) m+=1440; return a+Math.floor(m/dur); },0);
+  return html`<${Sheet} title="Ouvrir aux rendez-vous" onClose=${onClose} actions=${html`<button class="btn pri sm" onClick=${save}>Enregistrer</button>`}>
+    ${!bk.enabled && html`<div class="notice warn small">Votre page de réservation est désactivée : les clients ne verront pas ces plages. <button class="btn ghost sm" onClick=${()=>open('bookingSettings')}>Activer</button></div>`}
+    <div style="font-weight:600;text-transform:capitalize">${fdateLong(date)}</div>
+    <div class="sect"><div class="lab">Plages horaires</div>
+      ${ranges.map((r,i)=>html`<div class="row" style="flex-wrap:nowrap"><input class="inp" type="time" value=${r.from} onInput=${e=>setRanges(l=>l.map((x,j)=>j===i?{...x,from:e.target.value}:x))}/><span>à</span><input class="inp" type="time" value=${r.to} onInput=${e=>setRanges(l=>l.map((x,j)=>j===i?{...x,to:e.target.value}:x))}/>${ranges.length>1 && html`<button class="btn ghost sm" aria-label="Retirer" onClick=${()=>setRanges(l=>l.filter((_,j)=>j!==i))}>✕</button>`}</div>`)}
+      <button class="btn ghost sm" style="align-self:flex-start" onClick=${()=>setRanges(l=>[...l,{from:'18:00',to:'20:00'}])}>Ajouter une plage</button>
+      <div class="tiny">${slotsPer} créneau${slotsPer>1?'x':''} de ${dur} min par jour. Ceux déjà pris (agenda, Google Agenda, autres demandes) ne sont pas proposés.</div>
+    </div>
+    <div class="sect"><div class="lab">Mêmes horaires ces jours-là</div>
+      <div class="seg">${week.map(d=>{ const past=d<todayISO(); const on=days.includes(d); return html`<button disabled=${past} class=${on?'on':''} style=${past?'opacity:.35':''} onClick=${()=>setDays(l=>on?l.filter(x=>x!==d):[...l,d])}>${['lun','mar','mer','jeu','ven','sam','dim'][(parseISO(d).getDay()+6)%7]} ${parseISO(d).getDate()}</button>`; })}</div>
+      <label class="f">Répéter<select value=${String(weeks)} onChange=${e=>setWeeks(Number(e.target.value))}>${[[0,'Cette semaine seulement'],[1,'Aussi la semaine suivante'],[2,'Les 2 semaines suivantes'],[3,'Les 3 semaines suivantes'],[4,'Les 4 semaines suivantes'],[6,'Les 6 semaines suivantes'],[8,'Les 8 semaines suivantes']].map(([v,l])=>html`<option value=${v}>${l}</option>`)}</select></label>
+      <div class="tiny">${n} jour${n>1?'s':''} concerné${n>1?'s':''}. Les plages déjà ouvertes ces jours-là sont remplacées.</div>
+    </div>
+    ${existing.length>0 && html`<button class="btn danger" onClick=${closeDay}>Fermer ce jour aux rendez-vous</button>`}
+  <//>`;
+}
+function OpeningsList(){
+  useStore(); const list=openings();
+  const byWeek={}; list.forEach(o=>{ const m=mondayOf(o.date); (byWeek[m]=byWeek[m]||{}); (byWeek[m][o.date]=byWeek[m][o.date]||[]).push(o); });
+  return html`<div class="sect"><div class="row sb"><div class="lab">Plages ouvertes aux rendez-vous</div><button class="btn ghost sm" onClick=${()=>open('opening',{date:todayISO()})}>Ouvrir un jour</button></div>
+    ${list.length ? Object.keys(byWeek).sort().map(m=>html`<div class="card stack" style="gap:6px">
+        <div class="row sb"><b class="small">Semaine du ${fdate(m)}</b><button class="btn ghost sm" onClick=${()=>dupWeek(m)}>Dupliquer sur la semaine suivante</button></div>
+        ${Object.keys(byWeek[m]).sort().map(d=>html`<button class="item" style="padding:6px 8px" onClick=${()=>open('opening',{date:d})}><div class="grow"><span style="text-transform:capitalize">${parseISO(d).toLocaleDateString('fr-FR',{weekday:'long',day:'numeric',month:'long'})}</span></div><span class="tiny">${rangesLabel(byWeek[m][d])}</span></button>`)}
+      </div>`)
+    : html`<div class="muted small">Aucune plage ouverte. Dans l’agenda, touchez un jour puis « Ouvrir aux rendez-vous ». Sans plage ouverte, les clients peuvent quand même vous laisser une demande et vous leur proposez des créneaux.</div>`}
+  </div>`;
+}
 const WD = [['1','Lundi'],['2','Mardi'],['3','Mercredi'],['4','Jeudi'],['5','Vendredi'],['6','Samedi'],['0','Dimanche']];
 function BookingSettings({onClose}){
+  useStore();
   const [f,setF]=useState(()=>{ const def={enabled:false, title:'Prendre rendez-vous avec '+(activeProfile()?.tradeName||''), intro:'Choisissez un créneau pour que nous parlions de votre événement.', place:'Téléphone ou visio', duration:45, noticeHours:24, horizonDays:30, weekly:{'1':[{from:'18:00',to:'20:00'}],'3':[{from:'18:00',to:'20:00'}]}};
     const cur=clone(settings().booking||{}); return {...def, ...cur, weekly:cur.weekly||def.weekly}; });
   const set=(k,v)=>setF(x=>({...x,[k]:v}));
-  const setDay=(d,list)=>setF(x=>({...x, weekly:{...x.weekly, [d]:list}}));
   async function save(){
-    const data={...f, calendarId:settings().calendarId||''};
+    const {weekly, horizonDays, ...rest}=f; const fresh={...rest, openings:openings()};
+    const data={...fresh, calendarId:settings().calendarId||''};
     const {error}=await sb.from('booking_settings').upsert({user_id:backend.user.id, data, updated_at:new Date().toISOString()});
     if(error){ toast('Enregistrement impossible : '+error.message); return; }
-    await saveSettings({booking:f}); toast('Disponibilités enregistrées'); onClose();
+    await saveSettings({booking:fresh}); toast('Page de réservation enregistrée'); onClose();
   }
   const link=bookingLink();
   return html`<${Sheet} title="Page de réservation" onClose=${onClose} actions=${html`<button class="btn pri sm" onClick=${save}>Enregistrer</button>`}>
@@ -2612,13 +2689,8 @@ function BookingSettings({onClose}){
       <${F} label="Lieu du rendez-vous" value=${f.place} onInput=${v=>set('place',v)}/>
       <${Sel} label="Durée d’un rendez-vous" value=${String(f.duration)} onChange=${v=>set('duration',Number(v))} options=${[['15','15 min'],['30','30 min'],['45','45 min'],['60','1 h'],['90','1 h 30']]}/>
       <${F} label="Délai minimum avant un rendez-vous (heures)" type="number" value=${f.noticeHours} onInput=${v=>set('noticeHours',v)}/>
-      <${F} label="Réservable jusqu’à (jours à l’avance)" type="number" value=${f.horizonDays} onInput=${v=>set('horizonDays',v)}/>
     </div>
-    <div class="sect"><div class="lab">Mes disponibilités chaque semaine</div>
-      ${WD.map(([d,l])=>{ const list=f.weekly[d]||[]; return html`<div class="line-ed"><div class="row sb"><b>${l}</b><button class="btn ghost sm" onClick=${()=>setDay(d,[...list,{from:'18:00',to:'20:00'}])}>Ajouter une plage</button></div>
-        ${list.length? list.map((r,i)=>html`<div class="row" style="flex-wrap:nowrap"><input class="inp" type="time" value=${r.from} onInput=${e=>setDay(d,list.map((x,j)=>j===i?{...x,from:e.target.value}:x))}/><span>à</span><input class="inp" type="time" value=${r.to} onInput=${e=>setDay(d,list.map((x,j)=>j===i?{...x,to:e.target.value}:x))}/><button class="btn ghost sm" onClick=${()=>setDay(d,list.filter((_,j)=>j!==i))}>Retirer</button></div>`) : html`<div class="tiny">Indisponible</div>`}</div>`; })}
-      <div class="tiny">Les créneaux déjà occupés (dates de l’agenda, rendez-vous, événements de votre Google Agenda) ne sont jamais proposés.</div>
-    </div>
+    <${OpeningsList}/>
   <//>`;
 }
 function GoogleCard(){

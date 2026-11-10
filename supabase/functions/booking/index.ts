@@ -10,7 +10,7 @@ async function ping(u: string, id: string, title: string, body: string) {
   try { await pushToUser(u, { title, body, url: appLink(id), tag: `bk-${id}` }); } catch (_) { /* pas de clés ou pas d'appareil */ }
 }
 
-type Range = { from: string; to: string };
+type Opening = { date: string; from: string; to: string };
 const DAY = 86400000;
 const FIELDS = ["kind", "firstName", "lastName", "company", "siret", "address", "cp", "city", "email", "phone", "eventType", "eventDate", "eventLocation", "guests", "music", "message"];
 
@@ -20,7 +20,7 @@ async function loadSettings(u: string) {
   if (!s.enabled) throw new Error("ferme");
   return {
     title: s.title || "Prise de rendez-vous", intro: s.intro || "", duration: Number(s.duration) || 60, noticeHours: Number(s.noticeHours ?? 24),
-    horizonDays: Math.min(90, Number(s.horizonDays) || 30), weekly: (s.weekly || {}) as Record<string, Range[]>, place: s.place || "", calendarId: s.calendarId || "",
+    openings: (Array.isArray(s.openings) ? s.openings : []) as Opening[], place: s.place || "", calendarId: s.calendarId || "",
   };
 }
 
@@ -51,21 +51,20 @@ async function busyIntervals(u: string, from: Date, to: Date, calendarId: string
 async function freeSlots(u: string) {
   const s = await loadSettings(u);
   const now = Date.now();
-  const start = new Date(now + s.noticeHours * 3600000);
-  const end = new Date(now + s.horizonDays * DAY);
-  const busy = await busyIntervals(u, new Date(now), end, s.calendarId);
+  const start = now + s.noticeHours * 3600000;
+  // plages ouvertes au cas par cas depuis l'agenda de Cabine (heure de Paris)
+  const ranges = s.openings
+    .filter((o) => /^\d{4}-\d{2}-\d{2}$/.test(o?.date || "") && /^\d{2}:\d{2}$/.test(o?.from || "") && /^\d{2}:\d{2}$/.test(o?.to || ""))
+    .map((o) => { const a = parisToUtc(o.date, o.from).getTime(); let b = parisToUtc(o.date, o.to).getTime(); if (b <= a) b += DAY; return [a, b] as [number, number]; })
+    .filter(([, b]) => b > start && b - now < 366 * DAY);
   const slots: { start: string; end: string }[] = [];
-  for (let t = now; t <= end.getTime(); t += DAY) {
-    const { date } = utcToParis(new Date(t));
-    const wd = new Date(date + "T12:00:00Z").getUTCDay();
-    for (const r of s.weekly[String(wd)] || []) {
-      let a = parisToUtc(date, r.from).getTime();
-      const b = parisToUtc(date, r.to).getTime();
-      while (a + s.duration * 60000 <= b) {
-        const e = a + s.duration * 60000;
-        if (a >= start.getTime() && !busy.some(([x, y]) => a < y && e > x)) slots.push({ start: new Date(a).toISOString(), end: new Date(e).toISOString() });
-        a = e;
-      }
+  if (!ranges.length) return { s, slots };
+  const busy = await busyIntervals(u, new Date(now), new Date(Math.max(...ranges.map((r) => r[1]))), s.calendarId);
+  const len = s.duration * 60000;
+  for (const [ra, rb] of ranges) {
+    for (let a = ra; a + len <= rb; a += len) {
+      const e = a + len;
+      if (a >= start && !busy.some(([x, y]) => a < y && e > x)) slots.push({ start: new Date(a).toISOString(), end: new Date(e).toISOString() });
     }
   }
   const seen = new Set<string>();
@@ -106,19 +105,21 @@ Deno.serve(async (req) => {
       if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(form.email || "")) return json({ error: "email_invalide" }, 400);
       if (!(form.lastName || form.company)) return json({ error: "nom_manquant" }, 400);
       const { slots } = await freeSlots(u);
-      const slot = slots.find((x) => x.start === body.slot?.start);
-      if (!slot) return json({ error: "creneau_indisponible" }, 409);
+      // aucun créneau ouvert : la demande part sans créneau, vous en proposerez depuis Cabine
+      const slot = body.slot ? slots.find((x) => x.start === body.slot?.start) : (slots.length ? undefined : null);
+      if (slot === undefined) return json({ error: "creneau_indisponible" }, 409);
       const { count } = await admin.from("booking_requests").select("id", { count: "exact", head: true }).eq("user_id", u).eq("status", "pending").filter("form->>email", "eq", form.email);
       if ((count || 0) >= 3) return json({ error: "trop_de_demandes" }, 429);
       const since = new Date(Date.now() - 24 * 3600 * 1000).toISOString();
       const { count: day } = await admin.from("booking_requests").select("id", { count: "exact", head: true }).eq("user_id", u).gte("created_at", since);
       if ((day || 0) >= 20) return json({ error: "trop_de_demandes" }, 429);
-      const { data: row, error } = await admin.from("booking_requests").insert({ user_id: u, slot_start: slot.start, slot_end: slot.end, form }).select("id").single();
+      const { data: row, error } = await admin.from("booking_requests").insert({ user_id: u, slot_start: slot?.start ?? null, slot_end: slot?.end ?? null, form }).select("id").single();
       if (error) throw error;
       const who = [form.firstName, form.lastName].filter(Boolean).join(" ") || form.company;
-      await ping(u, row.id, "Nouvelle demande de rendez-vous", `${who} · ${fmt(slot.start)}${form.eventType ? " · " + form.eventType : ""}`);
-      await notify(u, `Nouvelle demande de rendez-vous : ${who}`, `${who} demande un rendez-vous le ${fmt(slot.start)}.\n\nÉvénement : ${form.eventType || "—"} le ${form.eventDate || "—"} à ${form.eventLocation || "—"}\nE-mail : ${form.email}\nTéléphone : ${form.phone || "—"}\n\nMessage :\n${form.message || "—"}\n\nValidez ou proposez un autre créneau dans Cabine :\n${appLink(row.id)}`);
-      await notify(u, "Votre demande de rendez-vous a bien été reçue", `Bonjour ${form.firstName || who},\n\nJ'ai bien reçu votre demande de rendez-vous pour le ${fmt(slot.start)}. Je vous confirme le créneau très vite.\n\nÀ bientôt !`, form.email);
+      const when = slot ? fmt(slot.start) : "sans créneau, à vous de proposer";
+      await ping(u, row.id, "Nouvelle demande de rendez-vous", `${who} · ${when}${form.eventType ? " · " + form.eventType : ""}`);
+      await notify(u, `Nouvelle demande de rendez-vous : ${who}`, `${who} ${slot ? "demande un rendez-vous le " + fmt(slot.start) : "souhaite un rendez-vous (aucun créneau n'était ouvert) : proposez-lui des créneaux"}.\n\nÉvénement : ${form.eventType || "—"} le ${form.eventDate || "—"} à ${form.eventLocation || "—"}\nE-mail : ${form.email}\nTéléphone : ${form.phone || "—"}\n\nMessage :\n${form.message || "—"}\n\nValidez ou proposez un autre créneau dans Cabine :\n${appLink(row.id)}`);
+      await notify(u, "Votre demande de rendez-vous a bien été reçue", slot ? `Bonjour ${form.firstName || who},\n\nJ'ai bien reçu votre demande de rendez-vous pour le ${fmt(slot.start)}. Je vous confirme le créneau très vite.\n\nÀ bientôt !` : `Bonjour ${form.firstName || who},\n\nJ'ai bien reçu votre demande de rendez-vous. Je vous propose des créneaux très vite par e-mail.\n\nÀ bientôt !`, form.email);
       return json({ ok: true });
     }
     if (body.action === "pick") {

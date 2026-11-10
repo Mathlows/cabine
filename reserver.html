@@ -52,7 +52,7 @@ textarea{min-height:90px;resize:vertical}
     <div class="small muted" id="place"></div>
     <div class="days" id="days"></div>
     <div class="slots" id="slots"></div>
-    <div class="small muted" id="noslot" hidden>Aucun créneau libre pour le moment. Revenez un peu plus tard.</div>
+    <div class="small muted" id="noslot" hidden>Aucun créneau n’est ouvert pour le moment. Laissez vos coordonnées ci-dessous : je vous proposerai des créneaux par e-mail.</div>
   </section>
 
   <form id="form" class="card" hidden novalidate>
@@ -96,7 +96,7 @@ const CFG = window.CABINE_CONFIG || {};
 const q = new URLSearchParams(location.search);
 const U = q.get('u') || CFG.ownerId || '', T = q.get('t') || '';
 const $ = id => document.getElementById(id);
-let chosen = null, kind = 'particulier', proposalMode = false;
+let chosen = null, kind = 'particulier', proposalMode = false, noSlotMode = false;
 
 async function call(body){
   const r = await fetch(CFG.supabaseUrl + '/functions/v1/booking', {method:'POST', headers:{'Content-Type':'application/json', apikey:CFG.supabaseAnonKey, Authorization:'Bearer '+CFG.supabaseAnonKey}, body:JSON.stringify(body)});
@@ -134,7 +134,11 @@ async function start(){
       // en mode proposition, les infos ont déjà été données : le formulaire se réduit au bouton
       document.querySelectorAll('#form h2, #form .fields, #form .seg, #form > p').forEach(e=>e.hidden=true);
       renderSlots(info.proposals||[]);
-    } else renderSlots(info.slots||[]);
+    } else {
+      renderSlots(info.slots||[]);
+      // aucun créneau ouvert : la demande part sans créneau
+      if(!(info.slots||[]).length){ noSlotMode=true; $('days').hidden=true; $('slots').hidden=true; $('form').hidden=false; $('chosen').textContent='Sans créneau : vous recevrez des propositions par e-mail.'; document.querySelector('#form h2').textContent='Vos informations'; }
+    }
   }catch(e){ $('loading').hidden=true; $('closed').hidden=false; if(e.message==='lien_expire') $('closedMsg').textContent='Ce lien a expiré ou a déjà été utilisé.'; }
 }
 
@@ -154,7 +158,7 @@ $('coQ').addEventListener('input', e => { clearTimeout(coTimer); const v=e.targe
 
 $('form').addEventListener('submit', async e => {
   e.preventDefault(); $('ferr').hidden=true;
-  if(!chosen){ $('ferr').textContent='Choisissez d’abord un créneau.'; $('ferr').hidden=false; return; }
+  if(!chosen && !noSlotMode){ $('ferr').textContent='Choisissez d’abord un créneau.'; $('ferr').hidden=false; return; }
   const f = Object.fromEntries(new FormData(e.target).entries()); f.kind = kind;
   if(!proposalMode){
     if(!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(f.email||'')){ $('ferr').textContent='Indiquez une adresse e-mail valide.'; $('ferr').hidden=false; return; }
@@ -162,8 +166,9 @@ $('form').addEventListener('submit', async e => {
   }
   $('send').disabled=true;
   try{
-    await call(proposalMode ? {action:'pick', t:T, slot:chosen} : {action:'request', u:U, slot:chosen, form:f});
+    await call(proposalMode ? {action:'pick', t:T, slot:chosen} : {action:'request', u:U, slot:chosen||undefined, form:f});
     $('form').hidden=true; $('pick').hidden=true; $('done').hidden=false;
+    if(noSlotMode) $('doneMsg').textContent='Merci ! Votre demande a bien été envoyée. Vous recevrez des propositions de créneaux par e-mail.';
     if(proposalMode) $('doneMsg').textContent='Merci ! Le créneau du '+longDate(chosen.start)+' a été transmis. Vous recevrez une confirmation par e-mail.';
   }catch(err){
     $('send').disabled=false;
