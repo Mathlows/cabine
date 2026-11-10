@@ -118,6 +118,14 @@ label.f textarea{min-height:76px;resize:vertical}
 .cal .cell:hover{border-color:var(--ink-3)}
 .cal .cell.out{opacity:.4}
 .cal .cell.open{background-image:repeating-linear-gradient(135deg,var(--accent-soft) 0 5px,transparent 5px 10px)}
+.dpick{display:grid;grid-template-columns:repeat(7,1fr);gap:4px}
+.dpick .dow{font-size:.68rem;color:var(--ink-3);text-align:center;text-transform:uppercase;letter-spacing:.04em}
+.dpick button{font:inherit;border:1px solid var(--line);background:var(--surface);color:var(--ink);border-radius:8px;min-height:44px;padding:2px;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:1px;cursor:pointer;line-height:1.1}
+.dpick button .m{font-size:.62rem;color:var(--ink-3)}
+.dpick button.has{background-image:repeating-linear-gradient(135deg,var(--accent-soft) 0 4px,transparent 4px 8px)}
+.dpick button.on{background:var(--accent);color:var(--accent-ink);border-color:var(--accent)}
+.dpick button.on .m{color:inherit;opacity:.8}
+.dpick button:disabled{opacity:.3;cursor:default}
 .leg i.hatch{background:repeating-linear-gradient(135deg,var(--accent) 0 2px,var(--accent-soft) 2px 4px)!important}
 .cal .cell.sel{border-color:var(--accent);box-shadow:inset 0 0 0 1px var(--accent)}
 .cal .num{font-size:.8rem;font-weight:600;align-self:flex-start;min-width:20px;height:20px;padding:0 4px;display:grid;place-items:center;border-radius:10px}
@@ -2624,7 +2632,9 @@ function OpeningSheet({date, onClose}){
   const existing=openingsOn(date);
   const last=openings().slice(-1)[0];
   const [ranges,setRanges]=useState(()=>existing.length ? existing.map(o=>({from:o.from,to:o.to})) : [{from:last?.from||'14:00', to:last?.to||'18:00'}]);
-  const mon=mondayOf(date); const week=[0,1,2,3,4,5,6].map(i=>addDays(mon,i));
+  const minMon=mondayOf(todayISO());
+  const [from,setFrom]=useState(()=>mondayOf(date)); const grid=[...Array(14)].map((_,i)=>addDays(from,i));
+  const opDates=new Set(openings().map(o=>o.date));
   const [days,setDays]=useState([date]); const [weeks,setWeeks]=useState(0);
   const bk=settings().booking||{}; const dur=Number(bk.duration)||45;
   const targets=()=>{ const t=[]; for(let w=0;w<=weeks;w++) for(const d of days){ const x=addDays(d,7*w); if(x>=todayISO()) t.push(x); } return [...new Set(t)]; };
@@ -2635,23 +2645,27 @@ function OpeningSheet({date, onClose}){
     if(await saveOpenings([...openings().filter(o=>!ts.has(o.date)), ...t.flatMap(d=>ranges.map(r=>({date:d, from:r.from, to:r.to})))])){
       toast(t.length>1 ? t.length+' jours ouverts aux rendez-vous' : 'Jour ouvert aux rendez-vous'); onClose(); }
   }
-  async function closeDay(){ if(await saveOpenings(openings().filter(o=>o.date!==date))){ toast('Ce jour n’est plus ouvert aux rendez-vous'); onClose(); } }
+  async function closeDays(){ const ts=new Set(targets().filter(d=>opDates.has(d))); if(await saveOpenings(openings().filter(o=>!ts.has(o.date)))){ toast(ts.size>1?ts.size+' jours fermés aux rendez-vous':'Jour fermé aux rendez-vous'); onClose(); } }
   const n=targets().length;
   const slotsPer=ranges.reduce((a,r)=>{ if(!r.from||!r.to) return a; const [h1,m1]=r.from.split(':').map(Number), [h2,m2]=r.to.split(':').map(Number); let m=(h2*60+m2)-(h1*60+m1); if(m<=0) m+=1440; return a+Math.floor(m/dur); },0);
   return html`<${Sheet} title="Ouvrir aux rendez-vous" onClose=${onClose} actions=${html`<button class="btn pri sm" onClick=${save}>Enregistrer</button>`}>
     ${!bk.enabled && html`<div class="notice warn small">Votre page de réservation est désactivée : les clients ne verront pas ces plages. <button class="btn ghost sm" onClick=${()=>open('bookingSettings')}>Activer</button></div>`}
-    <div style="font-weight:600;text-transform:capitalize">${fdateLong(date)}</div>
     <div class="sect"><div class="lab">Plages horaires</div>
       ${ranges.map((r,i)=>html`<div class="row" style="flex-wrap:nowrap"><input class="inp" type="time" value=${r.from} onInput=${e=>setRanges(l=>l.map((x,j)=>j===i?{...x,from:e.target.value}:x))}/><span>à</span><input class="inp" type="time" value=${r.to} onInput=${e=>setRanges(l=>l.map((x,j)=>j===i?{...x,to:e.target.value}:x))}/>${ranges.length>1 && html`<button class="btn ghost sm" aria-label="Retirer" onClick=${()=>setRanges(l=>l.filter((_,j)=>j!==i))}>✕</button>`}</div>`)}
       <button class="btn ghost sm" style="align-self:flex-start" onClick=${()=>setRanges(l=>[...l,{from:'18:00',to:'20:00'}])}>Ajouter une plage</button>
       <div class="tiny">${slotsPer} créneau${slotsPer>1?'x':''} de ${dur} min par jour. Ceux déjà pris (agenda, Google Agenda, autres demandes) ne sont pas proposés.</div>
     </div>
-    <div class="sect"><div class="lab">Mêmes horaires ces jours-là</div>
-      <div class="seg">${week.map(d=>{ const past=d<todayISO(); const on=days.includes(d); return html`<button disabled=${past} class=${on?'on':''} style=${past?'opacity:.35':''} onClick=${()=>setDays(l=>on?l.filter(x=>x!==d):[...l,d])}>${['lun','mar','mer','jeu','ven','sam','dim'][(parseISO(d).getDay()+6)%7]} ${parseISO(d).getDate()}</button>`; })}</div>
+    <div class="sect"><div class="lab">Jours concernés</div>
+      <div class="row sb" style="flex-wrap:nowrap"><button class="btn sm" disabled=${from<=minMon} onClick=${()=>setFrom(f=>addDays(f,-7))} aria-label="Semaine précédente">‹</button>
+        <b class="small" style="text-align:center">Du ${parseISO(from).toLocaleDateString('fr-FR',{day:'numeric',month:'short'})} au ${parseISO(addDays(from,13)).toLocaleDateString('fr-FR',{day:'numeric',month:'short'})}</b>
+        <button class="btn sm" onClick=${()=>setFrom(f=>addDays(f,7))} aria-label="Semaine suivante">›</button></div>
+      <div class="dpick">${['lun','mar','mer','jeu','ven','sam','dim'].map(x=>html`<div class="dow">${x}</div>`)}
+        ${grid.map(d=>{ const past=d<todayISO(); const on=days.includes(d); const pd=parseISO(d); return html`<button disabled=${past} class=${[on&&'on', opDates.has(d)&&'has'].filter(Boolean).join(' ')} onClick=${()=>setDays(l=>on?l.filter(x=>x!==d):[...l,d])} aria-pressed=${on} aria-label=${fdateLong(d)}><b>${pd.getDate()}</b>${(pd.getDate()===1||d===grid[0]||d===grid[7]) && html`<span class="m">${pd.toLocaleDateString('fr-FR',{month:'short'})}</span>`}</button>`; })}</div>
+      <div class="row sb small"><span class="tiny">Touchez les jours à ouvrir, dans n’importe quelle semaine (flèches ‹ ›). Hachuré = déjà ouvert.</span>${days.length>0 && html`<button class="btn ghost sm" onClick=${()=>setDays([])}>Tout désélectionner</button>`}</div>
       <label class="f">Répéter<select value=${String(weeks)} onChange=${e=>setWeeks(Number(e.target.value))}>${[[0,'Cette semaine seulement'],[1,'Aussi la semaine suivante'],[2,'Les 2 semaines suivantes'],[3,'Les 3 semaines suivantes'],[4,'Les 4 semaines suivantes'],[6,'Les 6 semaines suivantes'],[8,'Les 8 semaines suivantes']].map(([v,l])=>html`<option value=${v}>${l}</option>`)}</select></label>
       <div class="tiny">${n} jour${n>1?'s':''} concerné${n>1?'s':''}. Les plages déjà ouvertes ces jours-là sont remplacées.</div>
     </div>
-    ${existing.length>0 && html`<button class="btn danger" onClick=${closeDay}>Fermer ce jour aux rendez-vous</button>`}
+    ${(()=>{ const k=targets().filter(d=>opDates.has(d)).length; return k>0 && html`<button class="btn danger" onClick=${closeDays}>${k>1?'Fermer ces '+k+' jours aux rendez-vous':'Fermer ce jour aux rendez-vous'}</button>`; })()}
   <//>`;
 }
 function OpeningsList(){
