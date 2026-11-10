@@ -20,6 +20,7 @@ async function loadSettings(u: string) {
   if (!s.enabled) throw new Error("ferme");
   return {
     title: s.title || "Prise de rendez-vous", intro: s.intro || "", duration: Number(s.duration) || 60, noticeHours: Number(s.noticeHours ?? 24),
+    mail: (s.mail || {}) as Record<string, { subject?: string; body?: string }>,
     openings: (Array.isArray(s.openings) ? s.openings : []) as Opening[], place: s.place || "", calendarId: s.calendarId || "",
   };
 }
@@ -71,6 +72,14 @@ async function freeSlots(u: string) {
   return { s, slots: slots.filter((x) => (seen.has(x.start) ? false : (seen.add(x.start), true))).sort((a, b) => a.start.localeCompare(b.start)) };
 }
 
+/* Remplit un modèle d'e-mail (<prenom>, <date_rdv>…) — majuscules et accents indifférents */
+const normKey = (k: string) => k.normalize("NFD").replace(/[\u0300-\u036f]/g, "").toLowerCase().trim().replace(/\s+/g, "_");
+function fill(t: string, v: Record<string, string>) {
+  return String(t || "").replace(/<([^<>\n]{2,30})>/g, (m, k) => { const key = normKey(k); return key in v ? v[key] : m; })
+    .replace(/Bonjour ,/g, "Bonjour,").replace(/[ \t]*\(\s*\)/g, "").replace(/[ \t]+([,.])/g, "$1").replace(/\n{3,}/g, "\n\n").replace(/[ \t]{2,}/g, " ").trim();
+}
+const frDate = (d: string) => (/^\d{4}-\d{2}-\d{2}$/.test(d || "") ? d.split("-").reverse().join("/") : d || "");
+
 function clean(form: any) {
   const o: Record<string, string> = {};
   for (const k of FIELDS) if (form?.[k] != null) o[k] = String(form[k]).slice(0, 1000).trim();
@@ -119,7 +128,11 @@ Deno.serve(async (req) => {
       const when = slot ? fmt(slot.start) : "sans créneau, à vous de proposer";
       await ping(u, row.id, "Nouvelle demande de rendez-vous", `${who} · ${when}${form.eventType ? " · " + form.eventType : ""}`);
       await notify(u, `Nouvelle demande de rendez-vous : ${who}`, `${who} ${slot ? "demande un rendez-vous le " + fmt(slot.start) : "souhaite un rendez-vous (aucun créneau n'était ouvert) : proposez-lui des créneaux"}.\n\nÉvénement : ${form.eventType || "—"} le ${form.eventDate || "—"} à ${form.eventLocation || "—"}\nE-mail : ${form.email}\nTéléphone : ${form.phone || "—"}\n\nMessage :\n${form.message || "—"}\n\nValidez ou proposez un autre créneau dans Cabine :\n${appLink(row.id)}`);
-      await notify(u, "Votre demande de rendez-vous a bien été reçue", slot ? `Bonjour ${form.firstName || who},\n\nJ'ai bien reçu votre demande de rendez-vous pour le ${fmt(slot.start)}. Je vous confirme le créneau très vite.\n\nÀ bientôt !` : `Bonjour ${form.firstName || who},\n\nJ'ai bien reçu votre demande de rendez-vous. Je vous propose des créneaux très vite par e-mail.\n\nÀ bientôt !`, form.email);
+      const s0 = await loadSettings(u);
+      const tpl = (slot ? s0.mail.recu : s0.mail.recu_libre) || {};
+      const vals = { prenom: form.firstName || "", nom: form.lastName || "", client: who || "", date_rdv: slot ? fmt(slot.start) : "", lieu_rdv: s0.place, type_soiree: form.eventType || "", date_prestation: frDate(form.eventDate || ""), lieu: form.eventLocation || "" };
+      if (tpl.subject && tpl.body) await notify(u, fill(tpl.subject, vals), fill(tpl.body, vals), form.email);
+      else await notify(u, "Votre demande de rendez-vous a bien été reçue", slot ? `Bonjour ${form.firstName || who},\n\nJ'ai bien reçu votre demande de rendez-vous pour le ${fmt(slot.start)}. Je vous confirme le créneau très vite.\n\nÀ bientôt !` : `Bonjour ${form.firstName || who},\n\nJ'ai bien reçu votre demande de rendez-vous. Je vous propose des créneaux très vite par e-mail.\n\nÀ bientôt !`, form.email);
       return json({ ok: true });
     }
     if (body.action === "pick") {

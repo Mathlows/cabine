@@ -1167,7 +1167,7 @@ function Sheets(){
   const [stack,setStack]=useState([]);
   useEffect(()=>{ pushSheet = s => setStack(x=>[...x,s]); },[]);
   const close = key => setStack(x=>x.filter(s=>s.key!==key));
-  const C = {opening:OpeningSheet, tpl:TemplateEditor, actions:ActionsSheet, monthBill:MonthBillSheet, importOv:ImportOverlaySheet, colorOne:ColorOne, dups:DuplicatesSheet, colors:ColorsSheet, yearDetail:YearDetail, send:SendSheet, booking:BookingView, bookingSettings:BookingSettings, client:ClientForm, product:ProductForm, profile:ProfileForm, doc:DocEditor, event:EventForm, confirm:Confirm, clientView:ClientView, picker:ProductPicker};
+  const C = {mailPrev:MailPrevSheet, opening:OpeningSheet, tpl:TemplateEditor, actions:ActionsSheet, monthBill:MonthBillSheet, importOv:ImportOverlaySheet, colorOne:ColorOne, dups:DuplicatesSheet, colors:ColorsSheet, yearDetail:YearDetail, send:SendSheet, booking:BookingView, bookingSettings:BookingSettings, client:ClientForm, product:ProductForm, profile:ProfileForm, doc:DocEditor, event:EventForm, confirm:Confirm, clientView:ClientView, picker:ProductPicker};
   return stack.map(s=>{ const Comp=C[s.kind]; return html`<${Comp} key=${s.key} ...${s.props} onClose=${()=>close(s.key)} />`; });
 }
 
@@ -2362,7 +2362,17 @@ function Login(){
 
 /* ---------------- envoi par e-mail ---------------- */
 /* ---------------- modèles d'e-mails ---------------- */
-const MAIL_CATS = [['devis','Devis'],['facture','Facture'],['avoir','Avoir'],['relance_devis','Relance devis'],['relance_facture','Relance facture']];
+const MAIL_CATS = [['devis','Devis'],['facture','Facture'],['avoir','Avoir'],['relance_devis','Relance devis'],['relance_facture','Relance facture'],
+  ['rdv_recu','Demande reçue'],['rdv_recu_libre','Demande reçue (sans créneau)'],['rdv_confirme','RDV confirmé'],['rdv_propose','Autres créneaux'],['rdv_propose_libre','Créneaux (demande sans créneau)'],['rdv_refus','Demande refusée']];
+const isRdvCat = c => String(c||'').startsWith('rdv_');
+const RDV_CAT_HELP = {
+  rdv_recu:'Envoyé automatiquement au client dès qu’il fait sa demande en choisissant un créneau.',
+  rdv_recu_libre:'Envoyé automatiquement au client quand il fait sa demande alors qu’aucun créneau n’était ouvert.',
+  rdv_confirme:'Proposé quand vous touchez « Valider ce créneau ». Vous le relisez avant l’envoi.',
+  rdv_propose:'Proposé quand vous envoyez d’autres créneaux à un client qui en avait choisi un.',
+  rdv_propose_libre:'Proposé quand vous envoyez des créneaux à un client qui n’en avait choisi aucun.',
+  rdv_refus:'Proposé quand vous touchez « Refuser ». Vous le relisez avant l’envoi.',
+};
 const SIGN = '\n\n<mon_prenom>\n<entreprise>\n<telephone>';
 const BUILTIN_TEMPLATES = [
   {id:'b-devis', cat:'devis', name:'Envoi de devis', subject:'Devis <numero> – <entreprise>', body:'Bonjour <prenom>,\n\nVeuillez trouver ci-joint le devis <numero> d’un montant de <montant> pour votre événement du <date_prestation>.\n\nN’hésitez pas à me contacter pour toute question. Pour le valider, il suffit de me retourner le devis signé.\n\nÀ bientôt,'+SIGN, isDefault:true},
@@ -2371,10 +2381,19 @@ const BUILTIN_TEMPLATES = [
   {id:'b-relance-devis', cat:'relance_devis', name:'Relance de devis', subject:'Relance – devis <numero>', body:'Bonjour <prenom>,\n\nJe reviens vers vous au sujet du devis <numero> d’un montant de <montant>, envoyé le <date_envoi>. Avez-vous pu en prendre connaissance ?\n\nJe reste disponible pour en discuter ou l’ajuster si besoin. Je vous le joins de nouveau.\n\nBien à vous,'+SIGN, isDefault:true},
   {id:'b-relance-facture', cat:'relance_facture', name:'Relance de facture', subject:'Relance – facture <numero>', body:'Bonjour <prenom>,\n\nSauf erreur de ma part, la facture <numero> d’un montant de <reste>, arrivée à échéance le <echeance>, n’a pas encore été réglée.\n\nVous la trouverez de nouveau en pièce jointe. Si le paiement est déjà parti, merci de ne pas tenir compte de ce message.\n\nBien cordialement,'+SIGN, isDefault:true},
 ];
-const mailTemplates = () => Array.isArray(settings().mailTemplates) ? settings().mailTemplates : BUILTIN_TEMPLATES;
+BUILTIN_TEMPLATES.push(
+  {id:'b-rdv-recu', cat:'rdv_recu', name:'Demande bien reçue', subject:'Votre demande de rendez-vous a bien été reçue', body:'Bonjour <prenom>,\n\nJ’ai bien reçu votre demande de rendez-vous pour le <date_rdv>. Je vous confirme le créneau très vite.\n\nÀ bientôt,\n<mon_nom>', isDefault:true},
+  {id:'b-rdv-recu-libre', cat:'rdv_recu_libre', name:'Demande bien reçue (sans créneau)', subject:'Votre demande de rendez-vous a bien été reçue', body:'Bonjour <prenom>,\n\nJ’ai bien reçu votre demande de rendez-vous. Je vous propose des créneaux très vite par e-mail.\n\nÀ bientôt,\n<mon_nom>', isDefault:true},
+  {id:'b-rdv-confirme', cat:'rdv_confirme', name:'Rendez-vous confirmé', subject:'Rendez-vous confirmé', body:'Bonjour <prenom>,\n\nJe vous confirme notre rendez-vous le <date_rdv> (<lieu_rdv>).\n\nÀ très vite,\n<mon_nom>', isDefault:true},
+  {id:'b-rdv-propose', cat:'rdv_propose', name:'Proposer d’autres créneaux', subject:'Proposition de créneaux pour notre rendez-vous', body:'Bonjour <prenom>,\n\nLe créneau demandé n’est malheureusement pas disponible. Je vous propose :\n<creneaux>\n\nChoisissez celui qui vous convient ici :\n<lien>\n\nÀ bientôt,\n<mon_nom>', isDefault:true},
+  {id:'b-rdv-propose-libre', cat:'rdv_propose_libre', name:'Proposer des créneaux', subject:'Proposition de créneaux pour notre rendez-vous', body:'Bonjour <prenom>,\n\nMerci pour votre demande de rendez-vous ! Voici les créneaux que je vous propose :\n<creneaux>\n\nChoisissez celui qui vous convient ici :\n<lien>\n\nÀ bientôt,\n<mon_nom>', isDefault:true},
+  {id:'b-rdv-refus', cat:'rdv_refus', name:'Refus de la demande', subject:'Votre demande de rendez-vous', body:'Bonjour <prenom>,\n\nJe ne suis malheureusement pas disponible pour ce rendez-vous. N’hésitez pas à refaire une demande sur un autre créneau :\n<lien>\n\nBien à vous,\n<mon_nom>', isDefault:true},
+);
+/* Modèles enregistrés + modèles standard des catégories où vous n'en avez aucun */
+const mailTemplates = () => { const saved=Array.isArray(settings().mailTemplates) ? settings().mailTemplates : null; if(!saved) return BUILTIN_TEMPLATES; const cats=new Set(saved.map(t=>t.cat)); return [...saved, ...BUILTIN_TEMPLATES.filter(t=>!cats.has(t.cat))]; };
 const templatesFor = cat => mailTemplates().filter(t=>t.cat===cat);
 const defaultTemplate = cat => templatesFor(cat).find(t=>t.isDefault) || templatesFor(cat)[0] || BUILTIN_TEMPLATES.find(t=>t.cat===cat);
-async function saveTemplates(list){ await saveSettings({mailTemplates:list}); }
+async function saveTemplates(list){ await saveSettings({mailTemplates:list}); if(backend.mode==='supabase' && settings().booking) await publishBooking(); }
 /* Champs remplaçables : <prenom>, <montant>… (majuscules et accents indifférents : <Prénom> marche aussi) */
 const MAIL_VARS = [
   ['prenom','Prénom du client (ou du contact pour une entreprise)'],['nom','Nom de famille du client'],['client','Nom du client ou de l’entreprise'],
@@ -2383,6 +2402,26 @@ const MAIL_VARS = [
   ['date_envoi','Date du premier envoi'],['jours','Jours écoulés (relance)'],['nb_relances','Nombre de relances déjà faites'],['facture_liee','Facture corrigée par l’avoir'],
   ['mon_prenom','Votre prénom'],['mon_nom','Votre prénom et nom'],['entreprise','Votre nom commercial'],['telephone','Votre téléphone'],['email','Votre e-mail'],
 ];
+const RDV_VARS = [
+  ['prenom','Prénom du client'],['nom','Nom de famille du client'],['client','Nom du client ou de l’entreprise'],
+  ['date_rdv','Date et heure du rendez-vous'],['lieu_rdv','Lieu du rendez-vous (réglages de la page de réservation)'],
+  ['type_soiree','Type de soirée indiqué par le client'],['date_prestation','Date prévue de la soirée'],['lieu','Lieu de la soirée'],
+  ['creneaux','Liste des créneaux proposés'],['lien','Lien pour choisir un créneau ou refaire une demande'],
+  ['mon_prenom','Votre prénom'],['mon_nom','Votre prénom et nom'],['entreprise','Votre nom commercial'],['telephone','Votre téléphone'],['email','Votre e-mail'],
+];
+// le message automatique « demande reçue » part du serveur : seuls ces champs y sont remplis
+const RDV_AUTO_VARS = ['prenom','nom','client','date_rdv','lieu_rdv','type_soiree','date_prestation','lieu','mon_prenom','mon_nom','entreprise','telephone','email'];
+const varsFor = cat => !isRdvCat(cat) ? MAIL_VARS : cat.startsWith('rdv_recu') ? RDV_VARS.filter(([k])=>RDV_AUTO_VARS.includes(k)) : RDV_VARS;
+const myValues = p => ({ mon_prenom:(p?.ownerName||'').trim().split(/\s+/)[0]||'', mon_nom:p?.ownerName||'', entreprise:p?.tradeName||p?.ownerName||'', telephone:p?.phone||'', email:p?.email||'' });
+function bookingValues(b, extra={}){
+  const f=b?.form||{};
+  return { prenom:f.firstName||'', nom:f.lastName||'', client:bookingName(f), date_rdv:b?.slot_start?fdt(b.slot_start):'', lieu_rdv:settings().booking?.place||'',
+    type_soiree:f.eventType||'', date_prestation:f.eventDate?fdate(f.eventDate):'', lieu:f.eventLocation||'', creneaux:'', lien:bookingLink(), ...myValues(activeProfile()), ...extra };
+}
+function renderVals(text, v){
+  return String(text||'').replace(/<([^<>\n]{2,30})>/g, (m,k)=>{ const key=norm(k).replace(/\s+/g,'_'); return key in v ? v[key] : m; })
+    .replace(/Bonjour ,/g,'Bonjour,').replace(/[ \t]*\(\s*\)/g,'').replace(/[ \t]+([,.])/g,'$1').replace(/\n{3,}/g,'\n\n').replace(/[ \t]{2,}/g,' ').replace(/\n+$/,'').trim();
+}
 function mailValues(d){
   const c=docClient(d)||{}, live=clientById(d.clientId)||{}, p=docProfile(d)||{}, t=computeTotals(d,p);
   const cl={...c, contact:live.contact||c.contact, firstName:live.firstName||c.firstName, lastName:live.lastName||c.lastName};
@@ -2398,11 +2437,7 @@ function mailValues(d){
     mon_prenom:(p.ownerName||'').trim().split(/\s+/)[0]||'', mon_nom:p.ownerName||'', entreprise:p.tradeName||p.ownerName||'', telephone:p.phone||'', email:p.email||'',
   };
 }
-function renderMail(text, d){
-  const v=mailValues(d);
-  return String(text||'').replace(/<([^<>\n]{2,30})>/g, (m,k)=>{ const key=norm(k).replace(/\s+/g,'_'); return key in v ? v[key] : m; })
-    .replace(/Bonjour ,/g,'Bonjour,').replace(/[ \t]+([,.])/g,'$1').replace(/\n{3,}/g,'\n\n').replace(/[ \t]{2,}/g,' ').replace(/\n+$/,'').trim();
-}
+function renderMail(text, d){ return renderVals(text, mailValues(d)); }
 const mailCatFor = (d, relance) => relance ? (d.type==='devis'?'relance_devis':'relance_facture') : (d.type==='avoir'?'avoir':d.type==='devis'?'devis':'facture');
 
 /* ---------------- relances ---------------- */
@@ -2472,14 +2507,18 @@ function TemplatesView(){
   return html`<div class="wrap">
     <div class="row sb"><h1>Modèles d’e-mails</h1><button class="btn pri" onClick=${()=>open('tpl',{tpl:{id:uid(), cat, name:'', subject:defaultTemplate(cat).subject, body:defaultTemplate(cat).body, isDefault:!list.length}, isNew:true})}>Nouveau modèle</button></div>
     <p class="muted" style="margin:0">Au moment d’envoyer, seuls les modèles de la catégorie du document sont proposés. Le modèle « par défaut » est prérempli.</p>
-    <div class="seg" style="flex-wrap:wrap">${MAIL_CATS.map(([k,l])=>html`<button class=${cat===k?'on':''} onClick=${()=>{ setCat(k); lsSet('cabine-tplcat',k); }}>${l}</button>`)}</div>
+    ${[['Factures et devis',MAIL_CATS.filter(c=>!isRdvCat(c[0]))],['Rendez-vous',MAIL_CATS.filter(c=>isRdvCat(c[0]))]].map(([g,cs])=>html`<div class="stack" style="gap:4px"><div class="lab">${g}</div><div class="seg" style="flex-wrap:wrap">${cs.map(([k,l])=>html`<button class=${cat===k?'on':''} onClick=${()=>{ setCat(k); lsSet('cabine-tplcat',k); }}>${l}</button>`)}</div></div>`)}
+    ${RDV_CAT_HELP[cat] && html`<div class="tiny">${RDV_CAT_HELP[cat]}</div>`}
     ${list.length ? html`<div class="list">${list.map(t=>html`<button class="item" onClick=${()=>open('tpl',{tpl:t})}><div class="grow"><div class="t">${t.name||'Sans nom'}${t.isDefault?html` <span class="pill due">Par défaut</span>`:''}</div><div class="tiny" style="white-space:nowrap;overflow:hidden;text-overflow:ellipsis">${t.subject}</div></div><span class="tiny">Modifier</span></button>`)}</div>`
       : html`<div class="card empty"><h3>Aucun modèle dans cette catégorie</h3><p>Le texte standard de Cabine sera utilisé. Créez un modèle pour le personnaliser.</p></div>`}
   </div>`;
 }
 function TemplateEditor({tpl, isNew, onClose}){
   const [t,setT]=useState(()=>clone(tpl)); const bodyRef=useRef(null); const subjRef=useRef(null); const [focus,setFocus]=useState('body');
-  const sample = S.docs.filter(d=>d.number && (t.cat==='devis'||t.cat==='relance_devis' ? d.type==='devis' : t.cat==='avoir' ? d.type==='avoir' : d.type==='facture')).sort((a,b)=>(b.issueDate||'').localeCompare(a.issueDate||''))[0];
+  const rdv = isRdvCat(t.cat);
+  const bSample = S.bookings.find(x=>x.slot_start) || {form:{firstName:'Léa', lastName:'Martin', eventType:'Mariage', eventDate:addDays(todayISO(),200), eventLocation:'Château de la Prée'}, slot_start:new Date(Date.now()+3*86400000).toISOString().slice(0,11)+'17:00:00.000Z'};
+  const bVals = bookingValues(bSample, {creneaux:'• '+fdt(new Date(Date.now()+4*86400000).toISOString().slice(0,11)+'13:00:00.000Z')+'\n• '+fdt(new Date(Date.now()+5*86400000).toISOString().slice(0,11)+'17:00:00.000Z'), lien:bookingLink('t=exemple')});
+  const sample = rdv ? null : S.docs.filter(d=>d.number && (t.cat==='devis'||t.cat==='relance_devis' ? d.type==='devis' : t.cat==='avoir' ? d.type==='avoir' : d.type==='facture')).sort((a,b)=>(b.issueDate||'').localeCompare(a.issueDate||''))[0];
   const insert = k => { const ref=focus==='subject'?subjRef:bodyRef; const key=focus==='subject'?'subject':'body'; const el=ref.current; const tag='<'+k+'>';
     if(!el){ setT(x=>({...x,[key]:(x[key]||'')+tag})); return; }
     const a=el.selectionStart??el.value.length, b=el.selectionEnd??a; const v=el.value.slice(0,a)+tag+el.value.slice(b);
@@ -2500,9 +2539,11 @@ function TemplateEditor({tpl, isNew, onClose}){
       <label class="f full">Message<textarea ref=${bodyRef} style="min-height:220px" value=${t.body} onFocus=${()=>setFocus('body')} onInput=${e=>setT(x=>({...x,body:e.target.value}))}></textarea></label>
     </div>
     <div class="sect"><div class="lab">Insérer un champ (touchez pour l’ajouter à l’endroit du curseur)</div>
-      <div class="row" style="gap:6px">${MAIL_VARS.map(([k,l])=>html`<button class="btn sm" title=${l} onClick=${()=>insert(k)}>${'<'+k+'>'}</button>`)}</div>
+      <div class="row" style="gap:6px">${varsFor(t.cat).map(([k,l])=>html`<button class="btn sm" title=${l} onClick=${()=>insert(k)}>${'<'+k+'>'}</button>`)}</div>
       <div class="tiny">Chaque champ est remplacé par la bonne valeur au moment de l’envoi. Majuscules et accents indifférents : ${'<Prénom>'} marche aussi.</div></div>
     <label class="check"><input type="checkbox" checked=${!!t.isDefault} onChange=${e=>setT(x=>({...x,isDefault:e.target.checked}))}/><span>Modèle par défaut pour « ${MAIL_CATS.find(c=>c[0]===t.cat)?.[1]} »</span></label>
+    ${RDV_CAT_HELP[t.cat] && html`<div class="notice small">${RDV_CAT_HELP[t.cat]}</div>`}
+    ${rdv && html`<div class="sect"><div class="lab">Aperçu avec ${bookingName(bSample.form)}${S.bookings.some(x=>x.slot_start)?'':' (exemple)'}</div><div class="card stack" style="font-size:.92rem;gap:8px"><div><span class="tiny">Objet</span><br/><b>${renderVals(t.subject,bVals)}</b></div><div style="white-space:pre-wrap;border-top:1px solid var(--line);padding-top:8px">${renderVals(t.body,bVals)}</div></div></div>`}
     ${sample && html`<div class="sect"><div class="lab">Aperçu avec ${sample.number} (${clientName(docClient(sample))})</div><div class="card stack" style="font-size:.92rem;gap:8px"><div><span class="tiny">Objet</span><br/><b>${renderMail(t.subject,sample)}</b></div><div style="white-space:pre-wrap;border-top:1px solid var(--line);padding-top:8px">${renderMail(t.body,sample)}</div></div></div>`}
     ${!isNew && html`<button class="btn danger" style="align-self:flex-start" onClick=${remove}>Supprimer ce modèle</button>`}
   <//>`;
@@ -2570,9 +2611,11 @@ function BookingView({id, onClose}){
   useStore(); const b=S.bookings.find(x=>x.id===id); const [props,setProps]=useState([{date:'',time:''}]); const [busy,setBusy]=useState(false);
   if(!b) return null; const f=b.form||{}; const st=settings(); const dur=Number(st.booking?.duration)||60;
   const answers = [['Type',f.kind==='entreprise'?'Entreprise':'Particulier'],['Société',f.company],['SIRET',f.siret],['Nom',[f.firstName,f.lastName].filter(Boolean).join(' ')],['Adresse',[f.address,[f.cp,f.city].filter(Boolean).join(' ')].filter(Boolean).join(', ')],['E-mail',f.email],['Téléphone',f.phone],['Événement',f.eventType],['Date prévue',f.eventDate&&fdate(f.eventDate)],['Lieu',f.eventLocation],['Invités',f.guests],['Musique',f.music],['Message',f.message]].filter(x=>x[1]);
-  async function mail(to, subject, text){ try{ await gcall('send',{to, subject, text, fromName:activeProfile()?.tradeName||''}); }catch(e){ toast('E-mail non envoyé : '+e.message); } }
-  async function accept(){
-    setBusy(true);
+  async function mail(m){ if(!m) return; try{ await gcall('send',{to:m.to, subject:m.subject, text:m.body, fromName:activeProfile()?.tradeName||''}); toast('E-mail envoyé'); }catch(e){ toast('E-mail non envoyé : '+e.message); } }
+  // chaque e-mail est affiché pour relecture avant l'envoi
+  const preview = (cat, extra, title, onDone) => open('mailPrev', {cat, title, to:f.email, vals:bookingValues(b, extra), onDone:async m=>{ setBusy(true); await onDone(m); onClose(); }});
+  function accept(){ preview('rdv_confirme', {}, 'Confirmer le rendez-vous', doAccept); }
+  async function doAccept(m){
     let client = S.clients.find(c=>c.email && f.email && c.email.toLowerCase()===f.email.toLowerCase());
     if(!client){ client={...emptyClient(), kind:f.kind==='entreprise'?'entreprise':'particulier', firstName:f.firstName||'', lastName:f.lastName||'', company:f.company||'', contact:f.kind==='entreprise'?[f.firstName,f.lastName].filter(Boolean).join(' '):'', siret:(f.siret||'').replace(/\s/g,''), siren:(f.siret||'').replace(/\s/g,'').slice(0,9), address:f.address||'', cp:f.cp||'', city:f.city||'', email:f.email||'', phone:f.phone||'', fromBooking:true}; await put('clients',client); }
     const s=parisParts(b.slot_start), e=parisParts(b.slot_end);
@@ -2581,18 +2624,17 @@ function BookingView({id, onClose}){
     await put('events',ev);
     if(!rdvDevis(ev)) await makeRdvDevis(ev);
     await sb.from('booking_requests').update({status:'accepted'}).eq('id',b.id);
-    await mail(f.email, 'Rendez-vous confirmé', `Bonjour ${f.firstName||bookingName(f)},\n\nJe vous confirme notre rendez-vous le ${fdt(b.slot_start)}${st.booking?.place?' ('+st.booking.place+')':''}.\n\nÀ très vite,\n${activeProfile()?.ownerName||''}`);
-    toast('Rendez-vous validé : ajouté à l’agenda avec un devis provisoire'); onClose();
+    await mail(m);
+    toast('Rendez-vous validé : ajouté à l’agenda avec un devis provisoire');
   }
-  async function propose(){
+  function propose(){
     const list=props.filter(x=>x.date&&x.time).map(x=>{ const st0=new Date(`${x.date}T${x.time}:00`); return {start:st0.toISOString(), end:new Date(st0.getTime()+dur*60000).toISOString()}; });
     if(!list.length){ toast('Ajoutez au moins un créneau.'); return; }
-    setBusy(true);
-    await sb.from('booking_requests').update({status:'proposed', proposals:list, slot_start:null, slot_end:null}).eq('id',b.id);
-    await mail(f.email, 'Proposition de créneaux pour notre rendez-vous', `Bonjour ${f.firstName||bookingName(f)},\n\nLe créneau demandé n’est malheureusement pas disponible. Je vous propose :\n${list.map(x=>'• '+fdt(x.start)).join('\n')}\n\nChoisissez celui qui vous convient ici :\n${bookingLink('t='+b.token)}\n\nÀ bientôt,\n${activeProfile()?.ownerName||''}`);
-    toast('Créneaux proposés au client'); onClose();
+    preview(b.slot_start?'rdv_propose':'rdv_propose_libre', {creneaux:list.map(x=>'• '+fdt(x.start)).join('\n'), lien:bookingLink('t='+b.token)}, 'Proposer des créneaux', async m=>{
+      await sb.from('booking_requests').update({status:'proposed', proposals:list, slot_start:null, slot_end:null}).eq('id',b.id);
+      await mail(m); toast('Créneaux proposés au client'); });
   }
-  async function decline(){ setBusy(true); await sb.from('booking_requests').update({status:'declined'}).eq('id',b.id); await mail(f.email,'Votre demande de rendez-vous',`Bonjour ${f.firstName||bookingName(f)},\n\nJe ne suis malheureusement pas disponible pour ce rendez-vous. N’hésitez pas à refaire une demande sur un autre créneau :\n${bookingLink()}\n\nBien à vous,\n${activeProfile()?.ownerName||''}`); toast('Demande refusée'); onClose(); }
+  function decline(){ preview('rdv_refus', {}, 'Refuser la demande', async m=>{ await sb.from('booking_requests').update({status:'declined'}).eq('id',b.id); await mail(m); toast('Demande refusée'); }); }
   return html`<${Sheet} title=${bookingName(f)} onClose=${onClose}>
     ${b.slot_start ? html`<div class="card"><div class="tiny">Créneau ${f.picked?'choisi par le client':'demandé'}</div><div style="font-weight:600;font-size:1.05rem">${fdt(b.slot_start)}</div></div>`
       : b.status==='pending' && html`<div class="notice small">Aucun créneau n’était ouvert : proposez-lui des créneaux ci-dessous.</div>`}
@@ -2611,15 +2653,20 @@ const openings = () => (settings().booking?.openings||[]).filter(o=>o.date>=toda
 const openingsOn = d => openings().filter(o=>o.date===d).sort((a,b)=>a.from.localeCompare(b.from));
 const mondayOf = d => addDays(d, -((parseISO(d).getDay()+6)%7));
 const rangesLabel = list => list.map(o=>o.from.replace(':','h')+'–'+o.to.replace(':','h')).join(', ');
+/* Publie les réglages de la page de réservation (plages, textes, e-mail automatique « demande reçue ») */
+async function publishBooking(booking=settings().booking||{}){
+  if(backend.mode!=='supabase') return true;
+  const me=myValues(activeProfile()); const pub=cat=>{ const t=defaultTemplate(cat); return {subject:renderVals(t.subject,me), body:renderVals(t.body,me)}; };
+  const data={...booking, calendarId:settings().calendarId||'', mail:{recu:pub('rdv_recu'), recu_libre:pub('rdv_recu_libre')}};
+  const {error}=await sb.from('booking_settings').upsert({user_id:backend.user.id, data, updated_at:new Date().toISOString()});
+  if(error){ toast('Page de réservation non publiée : '+error.message); return false; }
+  return true;
+}
 async function saveOpenings(list){
   const clean=list.filter(o=>o.date>=todayISO() && o.from && o.to && o.from!==o.to).sort((a,b)=>(a.date+a.from).localeCompare(b.date+b.from));
   const booking={...(settings().booking||{}), openings:clean};
   await saveSettings({booking});
-  if(backend.mode==='supabase'){
-    const {error}=await sb.from('booking_settings').upsert({user_id:backend.user.id, data:{...booking, calendarId:settings().calendarId||''}, updated_at:new Date().toISOString()});
-    if(error){ toast('Plages non publiées : '+error.message); return false; }
-  }
-  return true;
+  return publishBooking(booking);
 }
 /* Copie les plages d'une semaine (lundi → dimanche) sur la semaine suivante */
 async function dupWeek(monday){
@@ -2679,6 +2726,28 @@ function OpeningsList(){
     : html`<div class="muted small">Aucune plage ouverte. Dans l’agenda, touchez un jour puis « Ouvrir aux rendez-vous ». Sans plage ouverte, les clients peuvent quand même vous laisser une demande et vous leur proposez des créneaux.</div>`}
   </div>`;
 }
+/* Relecture d'un e-mail de rendez-vous avant l'envoi (modèle modifiable, rien ne part sans votre accord) */
+function MailPrevSheet({cat, title, to, vals, onDone, onClose}){
+  const tpls=templatesFor(cat).length ? templatesFor(cat) : [defaultTemplate(cat)];
+  const fill=t=>({subject:renderVals(t.subject,vals), body:renderVals(t.body,vals)});
+  const [tid,setTid]=useState(defaultTemplate(cat).id);
+  const [m,setM]=useState(()=>({to:to||'', ...fill(defaultTemplate(cat))}));
+  const [busy,setBusy]=useState(false);
+  const pick=id=>{ setTid(id); const t=tpls.find(x=>x.id===id); if(t) setM(x=>({...x, ...fill(t)})); };
+  async function go(withMail){
+    if(withMail && !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(m.to.trim())){ toast('Adresse e-mail invalide.'); return; }
+    setBusy(true); try{ await onDone(withMail?{...m, to:m.to.trim()}:null); onClose(); }catch(e){ toast(e.message); setBusy(false); }
+  }
+  return html`<${Sheet} title=${title||'E-mail au client'} onClose=${onClose} actions=${html`<button class="btn pri sm" disabled=${busy} onClick=${()=>go(true)}>${busy?'Envoi…':'Envoyer'}</button>`}>
+    <div class="fields">
+      <label class="f full">À<input type="email" value=${m.to} onInput=${e=>setM(x=>({...x,to:e.target.value}))}/></label>
+      ${tpls.length>1 && html`<${Sel} label="Modèle" full value=${tid} onChange=${pick} options=${tpls.map(t=>[t.id,t.name||'Sans nom'])}/>`}
+      <label class="f full">Objet<input value=${m.subject} onInput=${e=>setM(x=>({...x,subject:e.target.value}))}/></label>
+      <label class="f full">Message<textarea style="min-height:220px" value=${m.body} onInput=${e=>setM(x=>({...x,body:e.target.value}))}></textarea></label>
+    </div>
+    <div class="row sb"><span class="tiny">Textes modifiables dans Plus → Modèles d’e-mails.</span><button class="btn ghost sm" disabled=${busy} onClick=${()=>go(false)}>Continuer sans e-mail</button></div>
+  <//>`;
+}
 const WD = [['1','Lundi'],['2','Mardi'],['3','Mercredi'],['4','Jeudi'],['5','Vendredi'],['6','Samedi'],['0','Dimanche']];
 function BookingSettings({onClose}){
   useStore();
@@ -2687,9 +2756,7 @@ function BookingSettings({onClose}){
   const set=(k,v)=>setF(x=>({...x,[k]:v}));
   async function save(){
     const {weekly, horizonDays, ...rest}=f; const fresh={...rest, openings:openings()};
-    const data={...fresh, calendarId:settings().calendarId||''};
-    const {error}=await sb.from('booking_settings').upsert({user_id:backend.user.id, data, updated_at:new Date().toISOString()});
-    if(error){ toast('Enregistrement impossible : '+error.message); return; }
+    if(!await publishBooking(fresh)) return;
     await saveSettings({booking:fresh}); toast('Page de réservation enregistrée'); onClose();
   }
   const link=bookingLink();
